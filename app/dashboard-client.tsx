@@ -5,7 +5,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
 type Section = "inicio" | "agenda" | "pacientes" | "historia" | "configuracion";
-type AppointmentStatus = "Confirmado" | "Pendiente" | "Atendido" | "Cancelado" | "Ausente";
+type AppointmentStatus = "Confirmado" | "Pendiente" | "Presente" | "En espera" | "Atendido" | "Cancelado" | "Ausente";
 
 type Appointment = {
   id: string;
@@ -17,7 +17,8 @@ type Appointment = {
   type: string;
   duration: string;
   durationMinutes: number;
-  reason: string;
+  administrativeNotes: string;
+  isWalkIn: boolean;
   status: AppointmentStatus;
 };
 
@@ -28,8 +29,9 @@ type AppointmentRow = {
   starts_at: string;
   duration_minutes: number;
   consultation_type: string;
-  reason: string | null;
-  status: "pending" | "confirmed" | "attended" | "cancelled" | "absent";
+  administrative_notes: string | null;
+  is_walk_in: boolean;
+  status: "pending" | "confirmed" | "present" | "waiting" | "attended" | "cancelled" | "absent";
   patients?: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] | null;
 };
 
@@ -123,6 +125,8 @@ function mapPatient(row: PatientRow): Patient {
 const appointmentStatusLabels: Record<AppointmentRow["status"], AppointmentStatus> = {
   pending: "Pendiente",
   confirmed: "Confirmado",
+  present: "Presente",
+  waiting: "En espera",
   attended: "Atendido",
   cancelled: "Cancelado",
   absent: "Ausente",
@@ -131,6 +135,8 @@ const appointmentStatusLabels: Record<AppointmentRow["status"], AppointmentStatu
 const appointmentStatusValues: Record<AppointmentStatus, AppointmentRow["status"]> = {
   Pendiente: "pending",
   Confirmado: "confirmed",
+  Presente: "present",
+  "En espera": "waiting",
   Atendido: "attended",
   Cancelado: "cancelled",
   Ausente: "absent",
@@ -149,7 +155,8 @@ function mapAppointment(row: AppointmentRow): Appointment {
     type: row.consultation_type,
     duration: `${row.duration_minutes} min`,
     durationMinutes: row.duration_minutes,
-    reason: row.reason || "",
+    administrativeNotes: row.administrative_notes || "",
+    isWalkIn: row.is_walk_in,
     status: appointmentStatusLabels[row.status],
   };
 }
@@ -208,7 +215,12 @@ export default function DashboardClient({
   const [appointmentFormError, setAppointmentFormError] = useState("");
   const [appointmentStatusUpdating, setAppointmentStatusUpdating] = useState<string | null>(null);
   const [appointmentDeleting, setAppointmentDeleting] = useState(false);
+  const [appointmentWalkIn, setAppointmentWalkIn] = useState(false);
   const [agendaDate, setAgendaDate] = useState(todayInputValue);
+  const isSecretary = profileRole === "secretary";
+  const accessibleNavItems = isSecretary
+    ? navItems.filter((item) => item.id === "inicio" || item.id === "agenda" || item.id === "pacientes")
+    : navItems;
 
   useEffect(() => {
     let mounted = true;
@@ -244,7 +256,7 @@ export default function DashboardClient({
       const range = dateRange(agendaDate);
       const { data, error } = await supabase
         .from("appointments")
-        .select("id, patient_id, professional_id, starts_at, duration_minutes, consultation_type, reason, status, patients!appointments_patient_id_fkey(first_name, last_name)")
+        .select("id, patient_id, professional_id, starts_at, duration_minutes, consultation_type, administrative_notes, is_walk_in, status, patients!appointments_patient_id_fkey(first_name, last_name)")
         .gte("starts_at", range.start)
         .lt("starts_at", range.end)
         .order("starts_at", { ascending: true });
@@ -279,8 +291,11 @@ export default function DashboardClient({
   }, [patients, search]);
 
   function navigateTo(nextSection: Section) {
-    setSection(nextSection);
-    if (nextSection === "inicio") setAgendaDate(todayInputValue());
+    const allowedSection = isSecretary && (nextSection === "historia" || nextSection === "configuracion")
+      ? "inicio"
+      : nextSection;
+    setSection(allowedSection);
+    if (allowedSection === "inicio") setAgendaDate(todayInputValue());
   }
 
   function openNewPatient() {
@@ -298,12 +313,22 @@ export default function DashboardClient({
 
   function openNewAppointment() {
     setEditingAppointment(null);
+    setAppointmentWalkIn(false);
+    setAppointmentFormError("");
+    setModal("appointment");
+  }
+
+  function openWalkInAppointment() {
+    setEditingAppointment(null);
+    setAppointmentWalkIn(true);
+    setAgendaDate(todayInputValue());
     setAppointmentFormError("");
     setModal("appointment");
   }
 
   function openEditAppointment(appointment: Appointment) {
     setEditingAppointment(appointment);
+    setAppointmentWalkIn(appointment.isWalkIn);
     setAppointmentFormError("");
     setModal("appointment");
   }
@@ -314,19 +339,27 @@ export default function DashboardClient({
     setPatientFormError("");
     const data = new FormData(event.currentTarget);
     const supabase = createClient();
-    const values = {
+    const phone = String(data.get("phone") || "").trim() || null;
+    const patientValues = {
       first_name: String(data.get("firstName") || "").trim(),
       last_name: String(data.get("lastName") || "").trim(),
       dni: String(data.get("dni") || "").trim(),
       birth_date: String(data.get("birthDate") || ""),
-      phone: String(data.get("phone") || "").trim() || null,
+      phone,
     };
-    const query = editingPatient
-      ? supabase.from("patients").update(values).eq("id", editingPatient.id)
-      : supabase.from("patients").insert(values);
-    const { data: savedPatient, error } = await query
-      .select("id, first_name, last_name, dni, birth_date, phone")
-      .single();
+    const saveResult = editingPatient
+      ? await supabase
+          .from("patients")
+          .update(isSecretary ? { phone } : patientValues)
+          .eq("id", editingPatient.id)
+          .select("id, first_name, last_name, dni, birth_date, phone")
+          .single()
+      : await supabase
+          .from("patients")
+          .insert(patientValues)
+          .select("id, first_name, last_name, dni, birth_date, phone")
+          .single();
+    const { data: savedPatient, error } = saveResult;
 
     if (error || !savedPatient) {
       setPatientFormError(
@@ -414,13 +447,14 @@ export default function DashboardClient({
       starts_at: startsAt.toISOString(),
       duration_minutes: durationMinutes,
       consultation_type: String(data.get("consultationType") || "Control ginecológico"),
-      reason: String(data.get("reason") || "").trim() || null,
+      administrative_notes: String(data.get("administrativeNotes") || "").trim() || null,
+      is_walk_in: appointmentWalkIn,
     };
     const query = editingAppointment
       ? supabase.from("appointments").update(values).eq("id", editingAppointment.id)
-      : supabase.from("appointments").insert({ ...values, status: "pending" });
+      : supabase.from("appointments").insert({ ...values, status: appointmentWalkIn ? "present" : "pending" });
     const { data: savedAppointment, error } = await query
-      .select("id, patient_id, professional_id, starts_at, duration_minutes, consultation_type, reason, status")
+      .select("id, patient_id, professional_id, starts_at, duration_minutes, consultation_type, administrative_notes, is_walk_in, status")
       .single();
 
     if (error || !savedAppointment) {
@@ -449,13 +483,14 @@ export default function DashboardClient({
 
     setAppointmentSaving(false);
     setEditingAppointment(null);
+    setAppointmentWalkIn(false);
     setModal(null);
     setSection("agenda");
     if (date !== agendaDate) setAgendaDate(date);
   }
 
   async function deleteAppointment() {
-    if (!editingAppointment) return;
+    if (!editingAppointment || isSecretary) return;
     const confirmed = window.confirm(`¿Eliminar el turno de ${editingAppointment.patient}? Esta acción no se puede deshacer.`);
     if (!confirmed) return;
 
@@ -473,10 +508,15 @@ export default function DashboardClient({
     setAppointments((current) => current.filter((appointment) => appointment.id !== editingAppointment.id));
     setAppointmentDeleting(false);
     setEditingAppointment(null);
+    setAppointmentWalkIn(false);
     setModal(null);
   }
 
   async function changeAppointmentStatus(appointmentId: string, status: AppointmentStatus) {
+    if (isSecretary && status === "Atendido") {
+      setAppointmentsError("El estado Atendido debe registrarlo el profesional.");
+      return;
+    }
     setAppointmentStatusUpdating(appointmentId);
     setAppointmentsError("");
 
@@ -504,7 +544,7 @@ export default function DashboardClient({
           <Image className="brand-logo" src="/logo-consultorio.png" alt="Consultorio ginecológico" width={1343} height={335} priority />
         </div>
         <nav aria-label="Navegación principal">
-          {navItems.map((item) => (
+          {accessibleNavItems.map((item) => (
             <button key={item.id} className={section === item.id ? "nav-item active" : "nav-item"} onClick={() => navigateTo(item.id)}>
               <span aria-hidden="true">{item.icon}</span>{item.label}
             </button>
@@ -535,8 +575,8 @@ export default function DashboardClient({
         </header>
 
         <div className="content">
-          {section === "inicio" && <Dashboard profileName={profileName} patientCount={patients.length} patientsLoading={patientsLoading} patients={patients} appointments={appointments} appointmentsLoading={appointmentsLoading} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onNewPatient={openNewPatient} onNewAppointment={openNewAppointment} onAgenda={() => navigateTo("agenda")} onPatients={() => navigateTo("pacientes")} />}
-          {section === "agenda" && <Agenda selectedDate={agendaDate} onDateChange={setAgendaDate} appointments={appointments} loading={appointmentsLoading} loadError={appointmentsError} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onEditAppointment={openEditAppointment} onNewAppointment={openNewAppointment} />}
+          {section === "inicio" && <Dashboard profileName={profileName} isSecretary={isSecretary} patientCount={patients.length} patientsLoading={patientsLoading} patients={patients} appointments={appointments} appointmentsLoading={appointmentsLoading} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onNewPatient={openNewPatient} onNewAppointment={openNewAppointment} onWalkIn={openWalkInAppointment} onAgenda={() => navigateTo("agenda")} onPatients={() => navigateTo("pacientes")} />}
+          {section === "agenda" && <Agenda selectedDate={agendaDate} onDateChange={setAgendaDate} appointments={appointments} loading={appointmentsLoading} loadError={appointmentsError} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onEditAppointment={openEditAppointment} onNewAppointment={openNewAppointment} onWalkIn={openWalkInAppointment} canMarkAttended={!isSecretary} />}
           {section === "pacientes" && <Patients patients={filteredPatients} loading={patientsLoading} loadError={patientsError} search={search} setSearch={setSearch} onNewPatient={openNewPatient} onSelect={setSelectedPatient} />}
           {section === "historia" && <ClinicalHistory patients={patients} onSelect={setSelectedPatient} />}
           {section === "configuracion" && <Settings />}
@@ -544,22 +584,23 @@ export default function DashboardClient({
       </section>
 
       <nav className="mobile-nav" aria-label="Navegación móvil">
-        {navItems.slice(0, 4).map((item) => (
+        {accessibleNavItems.slice(0, 4).map((item) => (
           <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => navigateTo(item.id)}><span>{item.icon}</span>{item.label.split(" ")[0]}</button>
         ))}
       </nav>
 
-      {modal === "patient" && <PatientModal patient={editingPatient} saving={patientSaving} error={patientFormError} onClose={() => { if (!patientSaving) { setEditingPatient(null); setModal(null); } }} onSubmit={savePatient} />}
-      {modal === "appointment" && <AppointmentModal patients={patients} appointment={editingAppointment} defaultDate={agendaDate} saving={appointmentSaving || appointmentDeleting} deleting={appointmentDeleting} error={appointmentFormError} onClose={() => { if (!appointmentSaving && !appointmentDeleting) { setEditingAppointment(null); setModal(null); } }} onSubmit={saveAppointment} onDelete={deleteAppointment} />}
+      {modal === "patient" && <PatientModal patient={editingPatient} contactOnly={isSecretary && Boolean(editingPatient)} saving={patientSaving} error={patientFormError} onClose={() => { if (!patientSaving) { setEditingPatient(null); setModal(null); } }} onSubmit={savePatient} />}
+      {modal === "appointment" && <AppointmentModal patients={patients} appointment={editingAppointment} isWalkIn={appointmentWalkIn} defaultDate={agendaDate} saving={appointmentSaving || appointmentDeleting} deleting={appointmentDeleting} canDelete={!isSecretary} error={appointmentFormError} onClose={() => { if (!appointmentSaving && !appointmentDeleting) { setEditingAppointment(null); setAppointmentWalkIn(false); setModal(null); } }} onSubmit={saveAppointment} onDelete={deleteAppointment} />}
       {selectedPatient && <PatientDrawer patient={selectedPatient} profileName={profileName} profileRole={profileRole} onEdit={() => openEditPatient(selectedPatient)} onClose={() => setSelectedPatient(null)} />}
     </main>
   );
 }
 
-function Dashboard({ profileName, patientCount, patientsLoading, patients, appointments, appointmentsLoading, updatingAppointmentId, onStatusChange, onNewPatient, onNewAppointment, onAgenda, onPatients }: { profileName: string; patientCount: number; patientsLoading: boolean; patients: Patient[]; appointments: Appointment[]; appointmentsLoading: boolean; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onNewPatient: () => void; onNewAppointment: () => void; onAgenda: () => void; onPatients: () => void }) {
+function Dashboard({ profileName, isSecretary, patientCount, patientsLoading, patients, appointments, appointmentsLoading, updatingAppointmentId, onStatusChange, onNewPatient, onNewAppointment, onWalkIn, onAgenda, onPatients }: { profileName: string; isSecretary: boolean; patientCount: number; patientsLoading: boolean; patients: Patient[]; appointments: Appointment[]; appointmentsLoading: boolean; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onNewPatient: () => void; onNewAppointment: () => void; onWalkIn: () => void; onAgenda: () => void; onPatients: () => void }) {
   const [renderedAt] = useState(() => Date.now());
   const confirmedCount = appointments.filter((appointment) => appointment.status === "Confirmado").length;
   const attendedCount = appointments.filter((appointment) => appointment.status === "Atendido").length;
+  const waitingCount = appointments.filter((appointment) => appointment.status === "Presente" || appointment.status === "En espera").length;
   const nextAppointment = appointments.find((appointment) => new Date(appointment.startsAt).getTime() >= renderedAt && appointment.status !== "Cancelado") || appointments[0];
   const nextPatient = patients.find((patient) => patient.id === nextAppointment?.patientId);
   const todayLabel = new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
@@ -573,14 +614,14 @@ function Dashboard({ profileName, patientCount, patientsLoading, patients, appoi
     <div className="stats-grid">
       <Stat icon="▣" value={appointmentsLoading ? "—" : String(appointments.length)} label="Turnos de hoy" detail={appointmentsLoading ? "Cargando agenda" : `${confirmedCount} confirmados`} tone="wine" />
       <Stat icon="◷" value={nextAppointment?.time || "—"} label="Próximo turno" detail={nextAppointment?.patient || "Sin turnos pendientes"} tone="rose" />
-      <Stat icon="✓" value={appointmentsLoading ? "—" : String(attendedCount)} label="Atendidas" detail={appointmentsLoading ? "Cargando agenda" : `${Math.max(appointments.length - attendedCount, 0)} pendientes`} tone="green" />
+      <Stat icon="✓" value={appointmentsLoading ? "—" : String(isSecretary ? waitingCount : attendedCount)} label={isSecretary ? "En consultorio" : "Atendidas"} detail={appointmentsLoading ? "Cargando agenda" : isSecretary ? "Presentes o en espera" : `${Math.max(appointments.length - attendedCount, 0)} pendientes`} tone="green" />
       <Stat icon="◎" value={patientsLoading ? "—" : String(patientCount)} label="Pacientes" detail={patientsLoading ? "Cargando registros" : "Guardadas en Supabase"} tone="sand" />
     </div>
     <div className="dashboard-grid">
       <section className="card appointments-card">
         <div className="card-header"><div><h2>Agenda de hoy</h2><p>{todayLabel}</p></div><button className="text-button" onClick={onAgenda}>Ver agenda completa →</button></div>
         <div className="appointment-list">
-          {appointments.map((appointment) => <AppointmentRow key={appointment.id} {...appointment} updating={updatingAppointmentId === appointment.id} onStatusChange={onStatusChange} />)}
+          {appointments.map((appointment) => <AppointmentRow key={appointment.id} {...appointment} canMarkAttended={!isSecretary} updating={updatingAppointmentId === appointment.id} onStatusChange={onStatusChange} />)}
           {!appointmentsLoading && appointments.length === 0 && <div className="compact-empty">No hay turnos registrados para hoy.</div>}
           {appointmentsLoading && <div className="compact-empty">Cargando agenda...</div>}
         </div>
@@ -588,10 +629,11 @@ function Dashboard({ profileName, patientCount, patientsLoading, patients, appoi
       <aside className="right-column">
         <section className="card quick-actions"><div className="card-header"><div><h2>Acciones rápidas</h2><p>Atajos frecuentes</p></div></div>
           <button onClick={onNewAppointment}><span className="quick-icon">＋</span><span><strong>Nuevo turno</strong><small>Agendar una consulta</small></span><b>›</b></button>
+          <button onClick={onWalkIn}><span className="quick-icon green">●</span><span><strong>Paciente sin turno</strong><small>Registrar llegada espontánea</small></span><b>›</b></button>
           <button onClick={onNewPatient}><span className="quick-icon rose">◎</span><span><strong>Nueva paciente</strong><small>Registrar ficha personal</small></span><b>›</b></button>
-          <button onClick={onPatients}><span className="quick-icon sand">⌕</span><span><strong>Buscar paciente</strong><small>Consultar historia clínica</small></span><b>›</b></button>
+          <button onClick={onPatients}><span className="quick-icon sand">⌕</span><span><strong>Buscar paciente</strong><small>{isSecretary ? "Consultar datos de contacto" : "Consultar historia clínica"}</small></span><b>›</b></button>
         </section>
-        <section className="card next-patient"><p className="eyebrow">PRÓXIMA PACIENTE</p>{nextAppointment ? <><div className="patient-summary"><span className="avatar avatar-lg">{nextAppointment.patient.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><div><h3>{nextAppointment.patient}</h3><p>{nextAppointment.type}</p></div><span className="time-pill">{nextAppointment.time}</span></div><div className="patient-meta"><span><small>Edad</small><strong>{nextPatient ? `${nextPatient.age} años` : "Sin registrar"}</strong></span><span><small>Última consulta</small><strong>{nextPatient?.lastVisit || "Sin consultas"}</strong></span></div><button className="secondary-button full" onClick={onPatients}>Abrir ficha clínica</button></> : <div className="compact-empty">No hay próximos turnos para hoy.</div>}</section>
+        <section className="card next-patient"><p className="eyebrow">PRÓXIMA PACIENTE</p>{nextAppointment ? <><div className="patient-summary"><span className="avatar avatar-lg">{nextAppointment.patient.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><div><h3>{nextAppointment.patient}</h3><p>{nextAppointment.type}</p></div><span className="time-pill">{nextAppointment.time}</span></div><div className="patient-meta"><span><small>Edad</small><strong>{nextPatient ? `${nextPatient.age} años` : "Sin registrar"}</strong></span><span><small>{isSecretary ? "Contacto" : "Última consulta"}</small><strong>{isSecretary ? nextPatient?.phone || "Sin registrar" : nextPatient?.lastVisit || "Sin consultas"}</strong></span></div><button className="secondary-button full" onClick={onPatients}>{isSecretary ? "Abrir datos administrativos" : "Abrir ficha clínica"}</button></> : <div className="compact-empty">No hay próximos turnos para hoy.</div>}</section>
       </aside>
     </div>
   </>;
@@ -601,16 +643,17 @@ function Stat({ icon, value, label, detail, tone }: { icon: string; value: strin
   return <article className="stat-card"><span className={`stat-icon ${tone}`}>{icon}</span><div><strong>{value}</strong><span>{label}</span><small>{detail}</small></div></article>;
 }
 
-function AppointmentStatusSelect({ appointmentId, patient, status, updating, onStatusChange }: { appointmentId: string; patient: string; status: AppointmentStatus; updating: boolean; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void }) {
+function AppointmentStatusSelect({ appointmentId, patient, status, updating, canMarkAttended, onStatusChange }: { appointmentId: string; patient: string; status: AppointmentStatus; updating: boolean; canMarkAttended: boolean; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void }) {
   const statusValue = appointmentStatusValues[status];
-  return <label className={`appointment-status-control status-control-${statusValue} ${updating ? "is-updating" : ""}`}><span className="status-dot" aria-hidden="true" /><select className="appointment-status-select" aria-label={`Estado del turno de ${patient}`} value={status} disabled={updating} onChange={(event) => onStatusChange(appointmentId, event.target.value as AppointmentStatus)}><option>Pendiente</option><option>Confirmado</option><option>Atendido</option><option>Cancelado</option><option>Ausente</option></select><span className="status-chevron" aria-hidden="true">⌄</span></label>;
+  const statuses: AppointmentStatus[] = ["Pendiente", "Confirmado", "Presente", "En espera", "Atendido", "Cancelado", "Ausente"];
+  return <label className={`appointment-status-control status-control-${statusValue} ${updating ? "is-updating" : ""}`}><span className="status-dot" aria-hidden="true" /><select className="appointment-status-select" aria-label={`Estado del turno de ${patient}`} value={status} disabled={updating} onChange={(event) => onStatusChange(appointmentId, event.target.value as AppointmentStatus)}>{statuses.map((option) => <option key={option} disabled={option === "Atendido" && !canMarkAttended}>{option}</option>)}</select><span className="status-chevron" aria-hidden="true">⌄</span></label>;
 }
 
-function AppointmentRow({ id, time, patient, type, duration, status, updating, onStatusChange }: { id: string; time: string; patient: string; type: string; duration: string; status: AppointmentStatus; updating: boolean; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void }) {
-  return <div className="appointment-row"><strong className="appointment-time">{time}</strong><span className="avatar">{patient.split(" ").map((p) => p[0]).join("").slice(0, 2)}</span><div className="appointment-person"><strong>{patient}</strong><small>{type} · {duration}</small></div><AppointmentStatusSelect appointmentId={id} patient={patient} status={status} updating={updating} onStatusChange={onStatusChange} /></div>;
+function AppointmentRow({ id, time, patient, type, duration, status, updating, canMarkAttended, onStatusChange }: { id: string; time: string; patient: string; type: string; duration: string; status: AppointmentStatus; updating: boolean; canMarkAttended: boolean; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void }) {
+  return <div className="appointment-row"><strong className="appointment-time">{time}</strong><span className="avatar">{patient.split(" ").map((p) => p[0]).join("").slice(0, 2)}</span><div className="appointment-person"><strong>{patient}</strong><small>{type} · {duration}</small></div><AppointmentStatusSelect appointmentId={id} patient={patient} status={status} updating={updating} canMarkAttended={canMarkAttended} onStatusChange={onStatusChange} /></div>;
 }
 
-function Agenda({ selectedDate, onDateChange, appointments, loading, loadError, updatingAppointmentId, onStatusChange, onEditAppointment, onNewAppointment }: { selectedDate: string; onDateChange: (date: string) => void; appointments: Appointment[]; loading: boolean; loadError: string; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onEditAppointment: (appointment: Appointment) => void; onNewAppointment: () => void }) {
+function Agenda({ selectedDate, onDateChange, appointments, loading, loadError, updatingAppointmentId, onStatusChange, onEditAppointment, onNewAppointment, onWalkIn, canMarkAttended }: { selectedDate: string; onDateChange: (date: string) => void; appointments: Appointment[]; loading: boolean; loadError: string; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onEditAppointment: (appointment: Appointment) => void; onNewAppointment: () => void; onWalkIn: () => void; canMarkAttended: boolean }) {
   const selectedDateValue = new Date(`${selectedDate}T12:00:00`);
   const dateLabel = new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(selectedDateValue);
   const isToday = selectedDate === todayInputValue();
@@ -620,7 +663,7 @@ function Agenda({ selectedDate, onDateChange, appointments, loading, loadError, 
     onDateChange(dateInputValue(nextDate));
   };
 
-  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">ORGANIZACIÓN</p><h1>Agenda</h1><p>Gestioná las consultas y horarios del consultorio.</p></div><button className="primary-button" onClick={onNewAppointment}>＋ Nuevo turno</button></div>{loadError && <div className="data-error" role="alert">{loadError}</div>}<section className="card calendar-card"><div className="calendar-toolbar"><button onClick={() => moveDate(-1)} aria-label="Ver día anterior">‹</button><div className="calendar-date-title"><h2>{dateLabel}</h2>{isToday && <span>Hoy</span>}</div><button onClick={() => moveDate(1)} aria-label="Ver día siguiente">›</button><label className="calendar-date-picker"><span>Elegir fecha</span><input type="date" value={selectedDate} onChange={(event) => onDateChange(event.target.value)} aria-label="Elegir fecha de la agenda" /></label><div className="view-switch"><button className={isToday ? "active" : ""} onClick={() => onDateChange(todayInputValue())} disabled={isToday}>Hoy</button><button className="active">Día</button><button disabled>Semana</button></div></div><div className="day-schedule">{appointments.map((a) => <div className="schedule-slot" key={a.id}><time>{a.time}</time><div className={`schedule-event event-${appointmentStatusValues[a.status]}`}><span className="event-accent" aria-hidden="true" /><strong>{a.patient}</strong><span>{a.type} · {a.duration}</span><div className="schedule-event-actions"><button type="button" onClick={() => onEditAppointment(a)} aria-label={`Editar turno de ${a.patient}`}>Editar</button><AppointmentStatusSelect appointmentId={a.id} patient={a.patient} status={a.status} updating={updatingAppointmentId === a.id} onStatusChange={onStatusChange} /></div></div></div>)}{!loading && appointments.length === 0 && <div className="agenda-empty"><span>◷</span><h3>Agenda libre</h3><p>No hay turnos registrados para esta fecha.</p><button className="secondary-button" onClick={onNewAppointment}>Crear un turno para este día</button></div>}{loading && <div className="agenda-empty"><p>Cargando agenda...</p></div>}</div></section></div>;
+  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">ORGANIZACIÓN</p><h1>Agenda</h1><p>Gestioná las consultas y horarios del consultorio.</p></div><div className="page-heading-actions"><button className="secondary-button" onClick={onWalkIn}>● Paciente sin turno</button><button className="primary-button" onClick={onNewAppointment}>＋ Nuevo turno</button></div></div>{loadError && <div className="data-error" role="alert">{loadError}</div>}<section className="card calendar-card"><div className="calendar-toolbar"><button onClick={() => moveDate(-1)} aria-label="Ver día anterior">‹</button><div className="calendar-date-title"><h2>{dateLabel}</h2>{isToday && <span>Hoy</span>}</div><button onClick={() => moveDate(1)} aria-label="Ver día siguiente">›</button><label className="calendar-date-picker"><span>Elegir fecha</span><input type="date" value={selectedDate} onChange={(event) => onDateChange(event.target.value)} aria-label="Elegir fecha de la agenda" /></label><div className="view-switch"><button className={isToday ? "active" : ""} onClick={() => onDateChange(todayInputValue())} disabled={isToday}>Hoy</button><button className="active">Día</button><button disabled>Semana</button></div></div><div className="day-schedule">{appointments.map((a) => <div className="schedule-slot" key={a.id}><time>{a.time}</time><div className={`schedule-event event-${appointmentStatusValues[a.status]}`}><span className="event-accent" aria-hidden="true" /><strong>{a.patient}{a.isWalkIn ? " · Sin turno" : ""}</strong><span>{a.type} · {a.duration}</span><div className="schedule-event-actions"><button type="button" onClick={() => onEditAppointment(a)} aria-label={`Editar turno de ${a.patient}`}>Editar</button><AppointmentStatusSelect appointmentId={a.id} patient={a.patient} status={a.status} updating={updatingAppointmentId === a.id} canMarkAttended={canMarkAttended} onStatusChange={onStatusChange} /></div></div></div>)}{!loading && appointments.length === 0 && <div className="agenda-empty"><span>◷</span><h3>Agenda libre</h3><p>No hay turnos registrados para esta fecha.</p><button className="secondary-button" onClick={onNewAppointment}>Crear un turno para este día</button></div>}{loading && <div className="agenda-empty"><p>Cargando agenda...</p></div>}</div></section></div>;
 }
 
 function Patients({ patients, loading, loadError, search, setSearch, onNewPatient, onSelect }: { patients: Patient[]; loading: boolean; loadError: string; search: string; setSearch: (value: string) => void; onNewPatient: () => void; onSelect: (patient: Patient) => void }) {
@@ -635,17 +678,18 @@ function Settings() {
   return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">PREFERENCIAS</p><h1>Configuración</h1><p>Datos generales y horarios del consultorio.</p></div></div><section className="card settings-card"><h2>Datos del consultorio</h2><div className="form-grid"><label>Nombre<input defaultValue="Consultorio Adri Caro" /></label><label>Especialidad<input defaultValue="Ginecología" /></label><label>Duración habitual del turno<select defaultValue="30"><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">60 minutos</option></select></label><label>Zona horaria<input defaultValue="Buenos Aires (GMT-3)" disabled /></label></div><div className="form-actions"><button className="primary-button">Guardar cambios</button></div></section></div>;
 }
 
-function PatientModal({ patient, saving, error, onClose, onSubmit }: { patient: Patient | null; saving: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function PatientModal({ patient, contactOnly, saving, error, onClose, onSubmit }: { patient: Patient | null; contactOnly: boolean; saving: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   const editing = Boolean(patient);
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="patient-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">{editing ? "DATOS DE LA PACIENTE" : "NUEVO REGISTRO"}</p><h2 id="patient-modal-title">{editing ? "Editar paciente" : "Nueva paciente"}</h2></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label>Nombre<input name="firstName" required maxLength={100} placeholder="Ej. Ana" defaultValue={patient?.firstName || ""} /></label><label>Apellido<input name="lastName" required maxLength={100} placeholder="Ej. Martínez" defaultValue={patient?.lastName || ""} /></label><label>DNI<input name="dni" required maxLength={20} placeholder="00.000.000" defaultValue={patient?.dni || ""} /></label><label>Fecha de nacimiento<input name="birthDate" type="date" required max={new Date().toISOString().slice(0, 10)} defaultValue={patient?.birthDate || ""} /></label><label className="wide">Teléfono<input name="phone" maxLength={50} placeholder="11 0000-0000" defaultValue={patient?.phone === "Sin registrar" ? "" : patient?.phone || ""} /></label></div><p className="form-hint">Los antecedentes clínicos se completarán dentro de la ficha de la paciente.</p>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving}>{saving ? "Guardando..." : editing ? "Guardar cambios" : "Guardar paciente"}</button></div></form></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="patient-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">{contactOnly ? "DATOS ADMINISTRATIVOS" : editing ? "DATOS DE LA PACIENTE" : "NUEVO REGISTRO"}</p><h2 id="patient-modal-title">{contactOnly ? "Editar contacto" : editing ? "Editar paciente" : "Nueva paciente"}</h2></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label>Nombre<input name="firstName" required maxLength={100} placeholder="Ej. Ana" defaultValue={patient?.firstName || ""} disabled={contactOnly} /></label><label>Apellido<input name="lastName" required maxLength={100} placeholder="Ej. Martínez" defaultValue={patient?.lastName || ""} disabled={contactOnly} /></label><label>DNI<input name="dni" required maxLength={20} placeholder="00.000.000" defaultValue={patient?.dni || ""} disabled={contactOnly} /></label><label>Fecha de nacimiento<input name="birthDate" type="date" required max={new Date().toISOString().slice(0, 10)} defaultValue={patient?.birthDate || ""} disabled={contactOnly} /></label><label className="wide">Teléfono<input name="phone" maxLength={50} placeholder="11 0000-0000" defaultValue={patient?.phone === "Sin registrar" ? "" : patient?.phone || ""} /></label></div><p className="form-hint">{contactOnly ? "Secretaría sólo puede modificar datos de contacto. Los datos identificatorios están protegidos." : "Los antecedentes clínicos se completarán dentro de la ficha de la paciente."}</p>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving}>{saving ? "Guardando..." : editing ? "Guardar cambios" : "Guardar paciente"}</button></div></form></section></div>;
 }
 
-function AppointmentModal({ patients, appointment, defaultDate, saving, deleting, error, onClose, onSubmit, onDelete }: { patients: Patient[]; appointment: Appointment | null; defaultDate: string; saving: boolean; deleting: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onDelete: () => void }) {
+function AppointmentModal({ patients, appointment, isWalkIn, defaultDate, saving, deleting, canDelete, error, onClose, onSubmit, onDelete }: { patients: Patient[]; appointment: Appointment | null; isWalkIn: boolean; defaultDate: string; saving: boolean; deleting: boolean; canDelete: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onDelete: () => void }) {
   const editing = Boolean(appointment);
+  const [openedAt] = useState(() => new Date());
   const appointmentDate = appointment ? new Date(appointment.startsAt) : null;
   const selectedDate = appointmentDate ? dateInputValue(appointmentDate) : defaultDate;
-  const selectedTime = appointmentDate ? `${String(appointmentDate.getHours()).padStart(2, "0")}:${String(appointmentDate.getMinutes()).padStart(2, "0")}` : "09:00";
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="appointment-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">AGENDA</p><h2 id="appointment-modal-title">{editing ? "Editar turno" : "Nuevo turno"}</h2></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label className="wide">Paciente<select name="patientId" required defaultValue={appointment?.patientId || ""}><option value="" disabled>{patients.length ? "Seleccionar paciente" : "Primero registrá una paciente"}</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}</select></label><label>Fecha<input name="date" type="date" required defaultValue={selectedDate} /></label><label>Horario<input name="time" type="time" required defaultValue={selectedTime} /></label><label>Duración<select name="duration" defaultValue={String(appointment?.durationMinutes || 30)}><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">60 minutos</option></select></label><label>Tipo de consulta<select name="consultationType" defaultValue={appointment?.type || "Control ginecológico"}><option>Control ginecológico</option><option>Primera consulta</option><option>PAP y control</option><option>Colposcopía</option><option>Control de embarazo</option><option>Procedimiento</option></select></label><label className="wide">Motivo o nota administrativa<input name="reason" maxLength={500} placeholder="Opcional. No incluir información clínica sensible." defaultValue={appointment?.reason || ""} /></label></div>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className={`form-actions ${editing ? "form-actions-between" : ""}`}>{editing && <button type="button" className="danger-button" onClick={onDelete} disabled={saving}>{deleting ? "Eliminando..." : "Eliminar turno"}</button>}<div className="form-actions-group"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving || patients.length === 0}>{saving && !deleting ? "Guardando..." : editing ? "Guardar cambios" : "Guardar turno"}</button></div></div></form></section></div>;
+  const selectedTime = appointmentDate ? `${String(appointmentDate.getHours()).padStart(2, "0")}:${String(appointmentDate.getMinutes()).padStart(2, "0")}` : isWalkIn ? `${String(openedAt.getHours()).padStart(2, "0")}:${String(openedAt.getMinutes()).padStart(2, "0")}` : "09:00";
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="appointment-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">{isWalkIn ? "RECEPCIÓN" : "AGENDA"}</p><h2 id="appointment-modal-title">{editing ? "Editar turno" : isWalkIn ? "Paciente sin turno" : "Nuevo turno"}</h2>{isWalkIn && <small className="modal-subtitle">Se registrará como presente en la agenda de hoy.</small>}</div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label className="wide">Paciente<select name="patientId" required defaultValue={appointment?.patientId || ""}><option value="" disabled>{patients.length ? "Seleccionar paciente" : "Primero registrá una paciente"}</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}</select></label><label>Fecha<input name="date" type="date" required defaultValue={selectedDate} /></label><label>Horario<input name="time" type="time" required defaultValue={selectedTime} /></label><label>Duración<select name="duration" defaultValue={String(appointment?.durationMinutes || 30)}><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">60 minutos</option></select></label><label>Tipo de consulta<select name="consultationType" defaultValue={appointment?.type || "Control ginecológico"}><option>Control ginecológico</option><option>Primera consulta</option><option>PAP y control</option><option>Colposcopía</option><option>Control de embarazo</option><option>Procedimiento</option></select></label><label className="wide">Nota administrativa<input name="administrativeNotes" maxLength={500} placeholder="Opcional. No incluir información clínica sensible." defaultValue={appointment?.administrativeNotes || ""} /></label></div>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className={`form-actions ${editing && canDelete ? "form-actions-between" : ""}`}>{editing && canDelete && <button type="button" className="danger-button" onClick={onDelete} disabled={saving}>{deleting ? "Eliminando..." : "Eliminar turno"}</button>}<div className="form-actions-group"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving || patients.length === 0}>{saving && !deleting ? "Guardando..." : editing ? "Guardar cambios" : isWalkIn ? "Agregar a la agenda" : "Guardar turno"}</button></div></div></form></section></div>;
 }
 
 function PatientDrawer({ patient, profileName, profileRole, onEdit, onClose }: { patient: Patient; profileName: string; profileRole: string; onEdit: () => void; onClose: () => void }) {
@@ -811,12 +855,12 @@ function PatientDrawer({ patient, profileName, profileRole, onEdit, onClose }: {
   return <>
     <div className="drawer-backdrop" onMouseDown={onClose}>
       <aside className="patient-drawer" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="drawer-top"><button onClick={onClose}>← Volver</button><button onClick={onEdit}>Editar datos</button></div>
+        <div className="drawer-top"><button onClick={onClose}>← Volver</button><button onClick={onEdit}>{clinicalAccess ? "Editar datos" : "Editar contacto"}</button></div>
         <div className="drawer-patient"><span className="avatar avatar-xl">{patient.initials}</span><h2>{patient.name}</h2><p>DNI {patient.dni} · {patient.age} años</p><span className="status status-confirmed">Ficha activa</span></div>
-        <div className="drawer-actions">{clinicalAccess && <button className="primary-button" onClick={() => { setConsultationError(""); setConsultationOpen(true); }}>＋ Nueva consulta</button>}<button className="secondary-button" onClick={onEdit}>Editar paciente</button></div>
+        <div className="drawer-actions">{clinicalAccess && <button className="primary-button" onClick={() => { setConsultationError(""); setConsultationOpen(true); }}>＋ Nueva consulta</button>}<button className="secondary-button" onClick={onEdit}>{clinicalAccess ? "Editar paciente" : "Editar contacto"}</button></div>
         <div className="drawer-tabs"><button className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>Resumen</button>{clinicalAccess && <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Historia clínica</button>}{clinicalAccess && <button className={tab === "gynecology" ? "active" : ""} onClick={() => setTab("gynecology")}>Ginecología</button>}</div>
         {clinicalError && <div className="data-error drawer-error">{clinicalError}</div>}
-        {tab === "summary" && <section className="clinical-summary"><h3>Resumen de la paciente</h3><div className="info-grid"><span><small>Teléfono</small><strong>{patient.phone}</strong></span><span><small>Última consulta</small><strong>{lastEntry ? new Date(lastEntry.consultation_date).toLocaleDateString("es-AR") : "Sin consultas"}</strong></span><span><small>Próximo turno</small><strong>{patient.nextVisit}</strong></span><span><small>Estado clínico</small><strong>{clinicalLoading ? "Cargando..." : `${entries.length} consultas`}</strong></span></div><h3>Última consulta</h3>{lastEntry ? <ClinicalTimelineEntry entry={lastEntry} profileName={profileName} /> : <div className="compact-empty">Todavía no hay consultas registradas.</div>}</section>}
+        {tab === "summary" && (clinicalAccess ? <section className="clinical-summary"><h3>Resumen de la paciente</h3><div className="info-grid"><span><small>Teléfono</small><strong>{patient.phone}</strong></span><span><small>Última consulta</small><strong>{lastEntry ? new Date(lastEntry.consultation_date).toLocaleDateString("es-AR") : "Sin consultas"}</strong></span><span><small>Próximo turno</small><strong>{patient.nextVisit}</strong></span><span><small>Estado clínico</small><strong>{clinicalLoading ? "Cargando..." : `${entries.length} consultas`}</strong></span></div><h3>Última consulta</h3>{lastEntry ? <ClinicalTimelineEntry entry={lastEntry} profileName={profileName} /> : <div className="compact-empty">Todavía no hay consultas registradas.</div>}</section> : <section className="clinical-summary"><h3>Datos administrativos</h3><div className="info-grid"><span><small>Teléfono</small><strong>{patient.phone}</strong></span><span><small>DNI</small><strong>{patient.dni}</strong></span><span><small>Edad</small><strong>{patient.age} años</strong></span><span><small>Próximo turno</small><strong>{patient.nextVisit}</strong></span></div><div className="privacy-card"><span>◇</span><div><strong>Acceso administrativo</strong><p>La historia clínica y los antecedentes médicos están reservados al profesional.</p></div></div></section>)}
         {tab === "history" && <section className="clinical-summary"><div className="section-title-row"><h3>Historia clínica</h3><span>{entries.length} registros</span></div>{clinicalLoading ? <div className="compact-empty">Cargando historia clínica...</div> : entries.length ? entries.map((entry) => <ClinicalTimelineEntry key={entry.id} entry={entry} profileName={profileName} />) : <div className="compact-empty">Todavía no hay consultas registradas.</div>}</section>}
         {tab === "gynecology" && <GynecologicalHistoryForm history={gynecologicalHistory} saving={gynecologySaving} message={gynecologyMessage} onSubmit={saveGynecologicalHistory} />}
       </aside>

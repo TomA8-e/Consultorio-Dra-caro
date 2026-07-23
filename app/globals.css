@@ -87,6 +87,8 @@ button { cursor:pointer; }
 .status-chevron { margin-left:auto; font-size:12px; line-height:1; transform:translateY(-1px); pointer-events:none; }
 .status-control-pending { --status-color:#986722; --status-bg:#fff5df; }
 .status-control-confirmed { --status-color:#27755a; --status-bg:#e7f4ef; }
+.status-control-present { --status-color:#247d70; --status-bg:#e5f7f3; }
+.status-control-waiting { --status-color:#426b9b; --status-bg:#eaf2fb; }
 .status-control-attended { --status-color:#675477; --status-bg:#f1ebf6; }
 .status-control-cancelled { --status-color:#936060; --status-bg:#f8ecec; }
 .status-control-absent { --status-color:#8a5735; --status-bg:#f7e9df; }
@@ -106,12 +108,18 @@ button { cursor:pointer; }
 .schedule-event-actions { position:absolute; right:14px; top:17px; display:flex; align-items:center; gap:8px; }
 .schedule-event-actions > button { height:31px; padding:0 10px; border:1px solid #decbd1; border-radius:8px; color:var(--wine); background:#fff; font-size:10px; font-weight:750; }
 .schedule-event-actions > button:hover { background:var(--wine-light); }
+.page-heading-actions { display:flex; align-items:center; gap:9px; }
+.modal-subtitle { margin-top:5px; display:block; color:var(--muted); font-size:10px; }
+.form-grid input:disabled { color:#91878a; background:#f5f2f3; cursor:not-allowed; }
+.quick-icon.green { color:var(--green); background:var(--green-soft); }
 .danger-button { min-height:41px; padding:0 14px; border:1px solid #e8c9cf; border-radius:9px; color:#9a3048; background:#fff4f5; font-size:12px; font-weight:750; }
 .danger-button:hover { background:#ffe9ec; }
 .form-actions-between { justify-content:space-between; }
 .form-actions-group { display:flex; gap:10px; }
 .event-pending { --event-color:#d7a44e; background:linear-gradient(90deg,#fffbf3 0%,#fff 28%); }
 .event-confirmed { --event-color:#4c9a7c; background:linear-gradient(90deg,#f4fbf8 0%,#fff 28%); }
+.event-present { --event-color:#399383; background:linear-gradient(90deg,#f1fbf8 0%,#fff 28%); }
+.event-waiting { --event-color:#5e82ad; background:linear-gradient(90deg,#f2f7fd 0%,#fff 28%); }
 .event-attended { --event-color:#8d76a1; background:linear-gradient(90deg,#faf7fc 0%,#fff 28%); }
 .event-cancelled { --event-color:#bc8585; background:linear-gradient(90deg,#fdf7f7 0%,#fff 28%); }
 .event-absent { --event-color:#ba815b; background:linear-gradient(90deg,#fdf8f4 0%,#fff 28%); }
@@ -127,6 +135,8 @@ button { cursor:pointer; }
   .form-actions-between { align-items:stretch; flex-direction:column-reverse; }
   .form-actions-group { width:100%; }
   .form-actions-group > button { flex:1; }
+  .page-heading-actions { width:100%; margin-top:15px; }
+  .page-heading-actions > button { flex:1; }
 }
 
 .calendar-date-title { min-width:250px; margin:0 8px; display:flex; align-items:center; gap:9px; }
