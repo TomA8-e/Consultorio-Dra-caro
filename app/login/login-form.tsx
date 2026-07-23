@@ -1,24 +1,18 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import styles from "./login.module.css";
 
-export default function LoginForm() {
+export default function LoginForm({ accessError = false }: { accessError?: boolean }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("error") === "access") {
-      setError("La cuenta todavía no tiene permiso para acceder al consultorio.");
-    }
-  }, []);
+  const [error, setError] = useState(accessError ? "La cuenta todavía no tiene permiso para acceder al consultorio." : "");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,11 +40,7 @@ export default function LoginForm() {
       <section className={styles.intro}>
         <div className={styles.introContent}>
           <div className={styles.brand}>
-            <span>AC</span>
-            <div>
-              <strong>Adri Caro</strong>
-              <small>Consultorio ginecológico</small>
-            </div>
+            <Image className={styles.brandLogo} src="/logo-consultorio.png" alt="Consultorio ginecológico" width={1343} height={335} priority />
           </div>
           <p className={styles.kicker}>GESTIÓN CLÍNICA PRIVADA</p>
           <h1>Un espacio cuidado para acompañar cada consulta.</h1>
@@ -68,7 +58,9 @@ export default function LoginForm() {
       </section>
 
       <section className={styles.formSide}>
-        <div className={styles.mobileBrand}><span>AC</span><strong>Adri Caro</strong></div>
+        <div className={styles.mobileBrand}>
+          <Image className={styles.mobileBrandLogo} src="/logo-consultorio.png" alt="Consultorio ginecológico" width={1343} height={335} priority />
+        </div>
         <form className={styles.formCard} onSubmit={handleSubmit}>
           <p className={styles.kicker}>BIENVENIDA</p>
           <h2>Ingresar al consultorio</h2>

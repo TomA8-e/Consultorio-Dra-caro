@@ -4,6 +4,7 @@ export const metadata = {
   title: "Ingresar | Consultorio Adri Caro",
 };
 
-export default function LoginPage() {
-  return <LoginForm />;
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const params = await searchParams;
+  return <LoginForm accessError={params.error === "access"} />;
 }

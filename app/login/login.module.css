@@ -1,9 +1,8 @@
 .page { min-height:100vh; display:grid; grid-template-columns:minmax(380px,.95fr) minmax(440px,1.05fr); background:#fff; }
 .intro { position:relative; overflow:hidden; padding:55px 8vw 50px 5.5vw; color:#fff; background:linear-gradient(145deg,#63273b 0%,#7a354c 58%,#91475d 100%); display:flex; align-items:center; }
 .introContent { max-width:570px; position:relative; z-index:2; }
-.brand { position:absolute; left:0; bottom:calc(100% + 100px); display:flex; align-items:center; gap:12px; }
-.brand > span,.mobileBrand > span { width:43px; height:43px; border-radius:13px; display:grid; place-items:center; color:#742f46; background:#fff; font-family:Georgia,serif; font-weight:700; box-shadow:0 9px 25px #31101d40; }
-.brand > div { display:flex; flex-direction:column; }.brand strong { font-family:Georgia,serif; font-size:18px; }.brand small { margin-top:2px; color:#f0dbe2; font-size:11px; }
+.brand { width:min(310px,52vw); position:absolute; left:0; bottom:calc(100% + 92px); padding:10px 14px; border-radius:12px; background:#fff; box-shadow:0 9px 25px #31101d40; }
+.brandLogo { width:100%; height:auto; display:block; }
 .kicker { margin:0 0 12px; color:#f3ccd7; font-size:10px; font-weight:800; letter-spacing:.16em; }
 .intro h1 { max-width:520px; margin:0; font-family:Georgia,"Times New Roman",serif; font-size:clamp(37px,4vw,57px); line-height:1.06; font-weight:500; letter-spacing:-.035em; }
 .description { max-width:480px; margin:22px 0 0; color:#f3dfe5; font-size:14px; line-height:1.75; }
@@ -16,4 +15,4 @@
 .error { margin:-3px 0 16px; padding:11px 12px; border:1px solid #e9cbd1; border-radius:8px; color:#8b3046; background:#fff1f3; font-size:11px; line-height:1.45; }
 .submit { width:100%; height:47px; margin-top:3px; border:1px solid #742f46; border-radius:9px; color:#fff; background:#742f46; box-shadow:0 7px 18px #742f4626; font-size:13px; font-weight:800; }.submit:hover { background:#572235; }.submit:disabled { opacity:.65; cursor:wait; }
 .help { margin:18px 0 0; color:#8b8185; text-align:center; font-size:10px; line-height:1.5; }.demo { position:absolute; bottom:24px; margin:0; color:#9b9094; font-size:9px; }.mobileBrand { display:none; }
-@media (max-width:850px) { .page { grid-template-columns:1fr; }.intro { display:none; }.formSide { min-height:100vh; padding:35px 22px 70px; }.mobileBrand { margin-bottom:50px; display:flex; align-items:center; gap:11px; align-self:flex-start; color:#742f46; }.mobileBrand strong { font-family:Georgia,serif; font-size:18px; }.mobileBrand > span { color:#fff; background:#742f46; }.formCard h2 { font-size:28px; } }
+@media (max-width:850px) { .page { grid-template-columns:1fr; }.intro { display:none; }.formSide { min-height:100vh; padding:35px 22px 70px; }.mobileBrand { width:min(285px,78vw); margin-bottom:50px; display:block; align-self:flex-start; }.mobileBrandLogo { width:100%; height:auto; display:block; }.formCard h2 { font-size:28px; } }
