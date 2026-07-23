@@ -139,17 +139,19 @@ function mapAppointment(row: AppointmentRow): Appointment {
   };
 }
 
-function todayInputValue() {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
+function dateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
-function todayRange() {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
+function todayInputValue() {
+  return dateInputValue(new Date());
+}
+
+function dateRange(value: string) {
+  const start = new Date(`${value}T00:00:00`);
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
   return { start: start.toISOString(), end: end.toISOString() };
@@ -196,6 +198,7 @@ export default function DashboardClient({
   const [appointmentSaving, setAppointmentSaving] = useState(false);
   const [appointmentFormError, setAppointmentFormError] = useState("");
   const [appointmentStatusUpdating, setAppointmentStatusUpdating] = useState<string | null>(null);
+  const [agendaDate, setAgendaDate] = useState(todayInputValue);
 
   useEffect(() => {
     let mounted = true;
@@ -225,8 +228,10 @@ export default function DashboardClient({
     let mounted = true;
 
     async function loadAppointments() {
+      setAppointmentsLoading(true);
+      setAppointmentsError("");
       const supabase = createClient();
-      const range = todayRange();
+      const range = dateRange(agendaDate);
       const { data, error } = await supabase
         .from("appointments")
         .select("id, patient_id, starts_at, duration_minutes, consultation_type, status, patients!appointments_patient_id_fkey(first_name, last_name)")
@@ -246,7 +251,13 @@ export default function DashboardClient({
 
     loadAppointments();
     return () => { mounted = false; };
-  }, []);
+  }, [agendaDate]);
+
+  useEffect(() => {
+    if (section === "inicio" && agendaDate !== todayInputValue()) {
+      setAgendaDate(todayInputValue());
+    }
+  }, [section, agendaDate]);
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -344,7 +355,7 @@ export default function DashboardClient({
       return;
     }
 
-    if (startsAt.toDateString() === new Date().toDateString()) {
+    if (date === agendaDate) {
       const mapped = mapAppointment({
         ...(createdAppointment as Omit<AppointmentRow, "patients">),
         patients: {
@@ -419,7 +430,7 @@ export default function DashboardClient({
 
         <div className="content">
           {section === "inicio" && <Dashboard profileName={profileName} patientCount={patients.length} patientsLoading={patientsLoading} patients={patients} appointments={appointments} appointmentsLoading={appointmentsLoading} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onNewPatient={() => { setPatientFormError(""); setModal("patient"); }} onNewAppointment={() => { setAppointmentFormError(""); setModal("appointment"); }} onAgenda={() => setSection("agenda")} onPatients={() => setSection("pacientes")} />}
-          {section === "agenda" && <Agenda appointments={appointments} loading={appointmentsLoading} loadError={appointmentsError} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onNewAppointment={() => { setAppointmentFormError(""); setModal("appointment"); }} />}
+          {section === "agenda" && <Agenda selectedDate={agendaDate} onDateChange={setAgendaDate} appointments={appointments} loading={appointmentsLoading} loadError={appointmentsError} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onNewAppointment={() => { setAppointmentFormError(""); setModal("appointment"); }} />}
           {section === "pacientes" && <Patients patients={filteredPatients} loading={patientsLoading} loadError={patientsError} search={search} setSearch={setSearch} onNewPatient={() => { setPatientFormError(""); setModal("patient"); }} onSelect={setSelectedPatient} />}
           {section === "historia" && <ClinicalHistory patients={patients} onSelect={setSelectedPatient} />}
           {section === "configuracion" && <Settings />}
@@ -433,7 +444,7 @@ export default function DashboardClient({
       </nav>
 
       {modal === "patient" && <PatientModal saving={patientSaving} error={patientFormError} onClose={() => { if (!patientSaving) setModal(null); }} onSubmit={addPatient} />}
-      {modal === "appointment" && <AppointmentModal patients={patients} saving={appointmentSaving} error={appointmentFormError} onClose={() => { if (!appointmentSaving) setModal(null); }} onSubmit={addAppointment} />}
+      {modal === "appointment" && <AppointmentModal patients={patients} defaultDate={agendaDate} saving={appointmentSaving} error={appointmentFormError} onClose={() => { if (!appointmentSaving) setModal(null); }} onSubmit={addAppointment} />}
       {selectedPatient && <PatientDrawer patient={selectedPatient} profileName={profileName} profileRole={profileRole} onClose={() => setSelectedPatient(null)} />}
     </main>
   );
@@ -492,9 +503,17 @@ function AppointmentRow({ id, time, patient, type, duration, status, updating, o
   return <div className="appointment-row"><strong className="appointment-time">{time}</strong><span className="avatar">{patient.split(" ").map((p) => p[0]).join("").slice(0, 2)}</span><div className="appointment-person"><strong>{patient}</strong><small>{type} · {duration}</small></div><AppointmentStatusSelect appointmentId={id} patient={patient} status={status} updating={updating} onStatusChange={onStatusChange} /></div>;
 }
 
-function Agenda({ appointments, loading, loadError, updatingAppointmentId, onStatusChange, onNewAppointment }: { appointments: Appointment[]; loading: boolean; loadError: string; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onNewAppointment: () => void }) {
-  const todayLabel = new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
-  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">ORGANIZACIÓN</p><h1>Agenda</h1><p>Gestioná las consultas y horarios del consultorio.</p></div><button className="primary-button" onClick={onNewAppointment}>＋ Nuevo turno</button></div>{loadError && <div className="data-error" role="alert">{loadError}</div>}<section className="card calendar-card"><div className="calendar-toolbar"><button disabled aria-label="Día anterior">‹</button><h2>{todayLabel}</h2><button disabled aria-label="Día siguiente">›</button><div className="view-switch"><button className="active">Día</button><button disabled>Semana</button><button disabled>Mes</button></div></div><div className="day-schedule">{appointments.map((a) => <div className="schedule-slot" key={a.id}><time>{a.time}</time><div className={`schedule-event event-${appointmentStatusValues[a.status]}`}><span className="event-accent" aria-hidden="true" /><strong>{a.patient}</strong><span>{a.type} · {a.duration}</span><AppointmentStatusSelect appointmentId={a.id} patient={a.patient} status={a.status} updating={updatingAppointmentId === a.id} onStatusChange={onStatusChange} /></div></div>)}{!loading && appointments.length === 0 && <div className="agenda-empty"><span>◷</span><h3>Agenda libre</h3><p>No hay turnos registrados para hoy.</p><button className="secondary-button" onClick={onNewAppointment}>Crear el primer turno</button></div>}{loading && <div className="agenda-empty"><p>Cargando agenda...</p></div>}</div></section></div>;
+function Agenda({ selectedDate, onDateChange, appointments, loading, loadError, updatingAppointmentId, onStatusChange, onNewAppointment }: { selectedDate: string; onDateChange: (date: string) => void; appointments: Appointment[]; loading: boolean; loadError: string; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onNewAppointment: () => void }) {
+  const selectedDateValue = new Date(`${selectedDate}T12:00:00`);
+  const dateLabel = new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(selectedDateValue);
+  const isToday = selectedDate === todayInputValue();
+  const moveDate = (days: number) => {
+    const nextDate = new Date(selectedDateValue);
+    nextDate.setDate(nextDate.getDate() + days);
+    onDateChange(dateInputValue(nextDate));
+  };
+
+  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">ORGANIZACIÓN</p><h1>Agenda</h1><p>Gestioná las consultas y horarios del consultorio.</p></div><button className="primary-button" onClick={onNewAppointment}>＋ Nuevo turno</button></div>{loadError && <div className="data-error" role="alert">{loadError}</div>}<section className="card calendar-card"><div className="calendar-toolbar"><button onClick={() => moveDate(-1)} aria-label="Ver día anterior">‹</button><div className="calendar-date-title"><h2>{dateLabel}</h2>{isToday && <span>Hoy</span>}</div><button onClick={() => moveDate(1)} aria-label="Ver día siguiente">›</button><label className="calendar-date-picker"><span>Elegir fecha</span><input type="date" value={selectedDate} onChange={(event) => onDateChange(event.target.value)} aria-label="Elegir fecha de la agenda" /></label><div className="view-switch"><button className={isToday ? "active" : ""} onClick={() => onDateChange(todayInputValue())} disabled={isToday}>Hoy</button><button className="active">Día</button><button disabled>Semana</button></div></div><div className="day-schedule">{appointments.map((a) => <div className="schedule-slot" key={a.id}><time>{a.time}</time><div className={`schedule-event event-${appointmentStatusValues[a.status]}`}><span className="event-accent" aria-hidden="true" /><strong>{a.patient}</strong><span>{a.type} · {a.duration}</span><AppointmentStatusSelect appointmentId={a.id} patient={a.patient} status={a.status} updating={updatingAppointmentId === a.id} onStatusChange={onStatusChange} /></div></div>)}{!loading && appointments.length === 0 && <div className="agenda-empty"><span>◷</span><h3>Agenda libre</h3><p>No hay turnos registrados para esta fecha.</p><button className="secondary-button" onClick={onNewAppointment}>Crear un turno para este día</button></div>}{loading && <div className="agenda-empty"><p>Cargando agenda...</p></div>}</div></section></div>;
 }
 
 function Patients({ patients, loading, loadError, search, setSearch, onNewPatient, onSelect }: { patients: Patient[]; loading: boolean; loadError: string; search: string; setSearch: (value: string) => void; onNewPatient: () => void; onSelect: (patient: Patient) => void }) {
@@ -513,8 +532,8 @@ function PatientModal({ saving, error, onClose, onSubmit }: { saving: boolean; e
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="patient-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">NUEVO REGISTRO</p><h2 id="patient-modal-title">Nueva paciente</h2></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label>Nombre<input name="firstName" required maxLength={100} placeholder="Ej. Ana" /></label><label>Apellido<input name="lastName" required maxLength={100} placeholder="Ej. Martínez" /></label><label>DNI<input name="dni" required maxLength={20} placeholder="00.000.000" /></label><label>Fecha de nacimiento<input name="birthDate" type="date" required max={new Date().toISOString().slice(0, 10)} /></label><label className="wide">Teléfono<input name="phone" maxLength={50} placeholder="11 0000-0000" /></label></div><p className="form-hint">Los antecedentes clínicos se completarán dentro de la ficha de la paciente.</p>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving}>{saving ? "Guardando..." : "Guardar paciente"}</button></div></form></section></div>;
 }
 
-function AppointmentModal({ patients, saving, error, onClose, onSubmit }: { patients: Patient[]; saving: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="appointment-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">AGENDA</p><h2 id="appointment-modal-title">Nuevo turno</h2></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label className="wide">Paciente<select name="patientId" required defaultValue=""><option value="" disabled>{patients.length ? "Seleccionar paciente" : "Primero registrá una paciente"}</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}</select></label><label>Fecha<input name="date" type="date" required defaultValue={todayInputValue()} /></label><label>Horario<input name="time" type="time" required defaultValue="09:00" /></label><label>Duración<select name="duration" defaultValue="30"><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">60 minutos</option></select></label><label>Tipo de consulta<select name="consultationType"><option>Control ginecológico</option><option>Primera consulta</option><option>PAP y control</option><option>Colposcopía</option><option>Control de embarazo</option><option>Procedimiento</option></select></label><label className="wide">Motivo o nota administrativa<input name="reason" maxLength={500} placeholder="Opcional. No incluir información clínica sensible." /></label></div>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving || patients.length === 0}>{saving ? "Guardando..." : "Guardar turno"}</button></div></form></section></div>;
+function AppointmentModal({ patients, defaultDate, saving, error, onClose, onSubmit }: { patients: Patient[]; defaultDate: string; saving: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="appointment-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">AGENDA</p><h2 id="appointment-modal-title">Nuevo turno</h2></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label className="wide">Paciente<select name="patientId" required defaultValue=""><option value="" disabled>{patients.length ? "Seleccionar paciente" : "Primero registrá una paciente"}</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}</select></label><label>Fecha<input name="date" type="date" required defaultValue={defaultDate} /></label><label>Horario<input name="time" type="time" required defaultValue="09:00" /></label><label>Duración<select name="duration" defaultValue="30"><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">60 minutos</option></select></label><label>Tipo de consulta<select name="consultationType"><option>Control ginecológico</option><option>Primera consulta</option><option>PAP y control</option><option>Colposcopía</option><option>Control de embarazo</option><option>Procedimiento</option></select></label><label className="wide">Motivo o nota administrativa<input name="reason" maxLength={500} placeholder="Opcional. No incluir información clínica sensible." /></label></div>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving || patients.length === 0}>{saving ? "Guardando..." : "Guardar turno"}</button></div></form></section></div>;
 }
 
 function PatientDrawer({ patient, profileName, profileRole, onClose }: { patient: Patient; profileName: string; profileRole: string; onClose: () => void }) {

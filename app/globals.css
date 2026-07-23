@@ -117,3 +117,20 @@ button { cursor:pointer; }
   .schedule-event .appointment-status-select { position:static; }
   .schedule-event .appointment-status-control { top:auto; right:auto; bottom:10px; left:16px; }
 }
+
+.calendar-date-title { min-width:250px; margin:0 8px; display:flex; align-items:center; gap:9px; }
+.calendar-date-title h2 { margin:0; text-transform:capitalize; }
+.calendar-date-title > span { padding:4px 7px; border-radius:999px; color:var(--wine); background:var(--wine-light); font-size:8px; font-weight:850; text-transform:uppercase; letter-spacing:.08em; }
+.calendar-date-picker { margin-left:auto; height:36px; padding:0 10px; display:flex; align-items:center; gap:8px; border:1px solid var(--border); border-radius:8px; color:var(--muted); background:#fff; font-size:9px; font-weight:700; }
+.calendar-date-picker input { width:108px; padding:0; border:0; outline:0; color:var(--ink); background:transparent; font:inherit; font-size:10px; cursor:pointer; }
+.calendar-toolbar > button:not(:disabled) { color:var(--wine); cursor:pointer; transition:background .16s ease,transform .16s ease; }
+.calendar-toolbar > button:not(:disabled):hover { background:var(--wine-light); transform:translateY(-1px); }
+.view-switch button:disabled { opacity:.45; cursor:default; }
+
+@media (max-width:760px) {
+  .calendar-toolbar { min-height:118px; padding:12px; flex-wrap:wrap; }
+  .calendar-date-title { min-width:0; flex:1; margin:0 3px; }
+  .calendar-date-title h2 { font-size:13px; }
+  .calendar-date-picker { width:100%; margin-left:0; justify-content:space-between; }
+  .calendar-date-picker input { width:auto; }
+}
