@@ -40,7 +40,7 @@ export default function LoginForm({ accessError = false }: { accessError?: boole
       <section className={styles.intro}>
         <div className={styles.introContent}>
           <div className={styles.brand}>
-            <Image className={styles.brandLogo} src="/logo-consultorio.png" alt="Consultorio ginecológico" width={1343} height={335} priority />
+            <Image className={styles.brandLogo} src="/logo-consultorio.png" alt="Consultorio ginecológico" width={1335} height={282} priority />
           </div>
           <p className={styles.kicker}>GESTIÓN CLÍNICA PRIVADA</p>
           <h1>Un espacio cuidado para acompañar cada consulta.</h1>
@@ -59,7 +59,7 @@ export default function LoginForm({ accessError = false }: { accessError?: boole
 
       <section className={styles.formSide}>
         <div className={styles.mobileBrand}>
-          <Image className={styles.mobileBrandLogo} src="/logo-consultorio.png" alt="Consultorio ginecológico" width={1343} height={335} priority />
+          <Image className={styles.mobileBrandLogo} src="/logo-consultorio.png" alt="Consultorio ginecológico" width={1335} height={282} priority />
         </div>
         <form className={styles.formCard} onSubmit={handleSubmit}>
           <p className={styles.kicker}>BIENVENIDA</p>
