@@ -537,7 +537,7 @@ export default function DashboardClient({
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <Image className="brand-logo" src="/logo-consultorio.png" alt="Consultorio ginecológico" width={1335} height={282} priority />
+          <Image className="brand-logo" src="/logo-consultorio-v2.png" alt="Consultorio ginecológico" width={1335} height={282} priority />
         </div>
         <nav aria-label="Navegación principal">
           {accessibleNavItems.map((item) => (
@@ -560,7 +560,7 @@ export default function DashboardClient({
       <section className="workspace">
         <header className="topbar">
           <button className="mobile-brand" onClick={() => navigateTo("inicio")} aria-label="Ir al inicio">
-            <Image src="/logo-simbolo.png" alt="" width={460} height={360} priority />
+            <Image src="/logo-simbolo-v2.png" alt="" width={460} height={360} priority />
           </button>
           <div className="top-search">
             <span>⌕</span>
