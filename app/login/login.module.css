@@ -19,3 +19,87 @@
 .requirements { margin:-7px 0 17px; color:#8b8185; font-size:10px; line-height:1.5; }
 .help { margin:12px 0 0; color:#8b8185; text-align:center; font-size:10px; line-height:1.5; }.mobileBrand { display:none; }
 @media (max-width:850px) { .page { grid-template-columns:1fr; }.intro { display:none; }.formSide { min-height:100vh; padding:35px 22px 70px; }.mobileBrand { width:min(285px,78vw); margin-bottom:50px; display:block; align-self:flex-start; }.mobileBrandLogo { width:100%; height:auto; display:block; }.formCard h2 { font-size:28px; } }
+
+/* Operativa premium */
+.page {
+  background:#f4eee4;
+}
+.intro {
+  padding-inline:6vw;
+  background:
+    radial-gradient(circle at 85% 12%,#ffffff12 0,transparent 19rem),
+    linear-gradient(155deg,#451528 0%,#2b0f19 72%);
+}
+.intro h1 {
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:clamp(36px,3.8vw,54px);
+  font-weight:800;
+  letter-spacing:-.045em;
+}
+.brand {
+  border-radius:16px;
+  background:#fffdf9;
+  box-shadow:0 16px 34px #17070d45;
+}
+.securityNote {
+  border-radius:14px;
+  background:#ffffff0d;
+}
+.formSide {
+  background:
+    radial-gradient(circle at 80% 6%,#fffaf1 0,transparent 20rem),
+    #f4eee4;
+}
+.formCard {
+  width:min(440px,100%);
+  padding:34px;
+  border:1px solid #e3d8cb;
+  border-radius:20px;
+  background:#fffdf9;
+  box-shadow:0 20px 55px #3c142316;
+}
+.formCard h2 {
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:29px;
+  font-weight:800;
+  letter-spacing:-.035em;
+}
+.formCard > .kicker { color:#6b2440; }
+.formCard label > input,.passwordField {
+  height:49px;
+  border-color:#dcd1c4;
+  border-radius:12px;
+  background:#fffdf9;
+}
+.formCard label > input:focus,.passwordField:focus-within {
+  border-color:#5b1831;
+  box-shadow:0 0 0 4px #5b183116;
+}
+.passwordField button,.authLink { color:#5b1831; }
+.submit {
+  height:49px;
+  border-color:#5b1831;
+  border-radius:12px;
+  background:linear-gradient(135deg,#6b1d3a,#421326);
+  box-shadow:0 11px 26px #3c14232a;
+}
+.submit:hover { background:linear-gradient(135deg,#57152e,#32101e); }
+.error { border-radius:11px; }
+.success {
+  border-color:#cad9ce;
+  border-radius:11px;
+  color:#476653;
+  background:#edf3ef;
+}
+
+@media (max-width:850px) {
+  .formSide { background:#f4eee4; }
+  .formCard { padding:28px 24px; border-radius:18px; }
+  .mobileBrand {
+    margin:0 auto 34px;
+    padding:12px 14px;
+    border:1px solid #e3d8cb;
+    border-radius:14px;
+    background:#fffdf9;
+  }
+}
