@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
-type Section = "inicio" | "agenda" | "pacientes" | "historia";
+type Section = "inicio" | "agenda" | "pacientes" | "historia" | "usuarios";
 type AppointmentStatus = "Confirmado" | "Pendiente" | "Presente" | "En espera" | "Atendido" | "Cancelado" | "Ausente";
 
 type Appointment = {
@@ -54,6 +54,19 @@ type PatientRow = {
   dni: string;
   birth_date: string;
   phone: string | null;
+};
+
+type StaffRole = "pending" | "professional" | "secretary" | "administrator";
+
+type StaffMember = {
+  id: string;
+  email: string;
+  full_name: string;
+  role: StaffRole;
+  active: boolean;
+  created_at: string;
+  last_sign_in_at: string | null;
+  is_current_user: boolean;
 };
 
 type ClinicalEntry = {
@@ -182,6 +195,12 @@ const navItems: { id: Section; label: string; icon: string }[] = [
   { id: "historia", label: "Historia clínica", icon: "＋" },
 ];
 
+const administratorNavItem: { id: Section; label: string; icon: string } = {
+  id: "usuarios",
+  label: "Usuarios",
+  icon: "♙",
+};
+
 export default function DashboardClient({
   profileName,
   profileRole,
@@ -218,7 +237,9 @@ export default function DashboardClient({
   const isAdministrator = profileRole === "administrator";
   const accessibleNavItems = isSecretary
     ? navItems.filter((item) => item.id === "inicio" || item.id === "agenda" || item.id === "pacientes")
-    : navItems;
+    : isAdministrator
+      ? [...navItems, administratorNavItem]
+      : navItems;
 
   useEffect(() => {
     let mounted = true;
@@ -603,11 +624,12 @@ export default function DashboardClient({
           {section === "agenda" && <Agenda selectedDate={agendaDate} onDateChange={setAgendaDate} appointments={appointments} loading={appointmentsLoading} loadError={appointmentsError} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onEditAppointment={openEditAppointment} onNewAppointment={openNewAppointment} onWalkIn={openWalkInAppointment} canMarkAttended={!isSecretary} />}
           {section === "pacientes" && <Patients patients={filteredPatients} loading={patientsLoading} loadError={patientsError} search={search} setSearch={setSearch} onNewPatient={openNewPatient} onSelect={setSelectedPatient} />}
           {section === "historia" && <ClinicalHistory patients={patients} onSelect={setSelectedPatient} />}
+          {section === "usuarios" && isAdministrator && <UserAdministration />}
         </div>
       </section>
 
       <nav className="mobile-nav" aria-label="Navegación móvil">
-        {accessibleNavItems.slice(0, 4).map((item) => (
+        {accessibleNavItems.map((item) => (
           <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => navigateTo(item.id)}><span>{item.icon}</span>{item.label.split(" ")[0]}</button>
         ))}
       </nav>
@@ -693,6 +715,244 @@ function Patients({ patients, loading, loadError, search, setSearch, onNewPatien
 
 function ClinicalHistory({ patients, onSelect }: { patients: Patient[]; onSelect: (patient: Patient) => void }) {
   return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">INFORMACIÓN CLÍNICA</p><h1>Historia clínica</h1><p>Acceso reservado exclusivamente a profesionales autorizados.</p></div></div><div className="privacy-card"><span>◇</span><div><strong>Información especialmente protegida</strong><p>Los registros clínicos finalizados conservarán su historial. Las correcciones se agregarán como nuevas versiones.</p></div></div><section className="card history-list"><div className="card-header"><div><h2>Seleccionar paciente</h2><p>Abrí una ficha para consultar su línea de tiempo clínica.</p></div></div>{patients.slice(0, 4).map((patient) => <button key={patient.id} onClick={() => onSelect(patient)}><span className="avatar">{patient.initials}</span><span><strong>{patient.name}</strong><small>Última consulta: {patient.lastVisit}</small></span><b>Abrir historia →</b></button>)}</section></div>;
+}
+
+const staffRoleLabels: Record<StaffRole, string> = {
+  pending: "Pendiente",
+  professional: "Profesional",
+  secretary: "Secretaría",
+  administrator: "Administración",
+};
+
+function formatStaffDate(value: string | null) {
+  if (!value) return "Nunca";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin registrar";
+  return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium" }).format(date);
+}
+
+function UserAdministration() {
+  const [members, setMembers] = useState<StaffMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState<StaffMember | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
+  async function loadMembers() {
+    setLoading(true);
+    setLoadError("");
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("list_staff_as_administrator");
+
+    if (error) {
+      setLoadError("No pudimos cargar los usuarios. Verificá que la migración de administración esté aplicada.");
+    } else {
+      setMembers((data || []) as StaffMember[]);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadInitialMembers() {
+      const supabase = createClient();
+      const { data, error } = await supabase.rpc("list_staff_as_administrator");
+      if (!mounted) return;
+
+      if (error) {
+        setLoadError("No pudimos cargar los usuarios. Verificá que la migración de administración esté aplicada.");
+      } else {
+        setMembers((data || []) as StaffMember[]);
+      }
+      setLoading(false);
+    }
+
+    loadInitialMembers();
+    return () => { mounted = false; };
+  }, []);
+
+  const filteredMembers = useMemo(() => {
+    const normalizedSearch = search.trim().toLocaleLowerCase("es");
+    if (!normalizedSearch) return members;
+    return members.filter((member) =>
+      `${member.full_name} ${member.email} ${staffRoleLabels[member.role]}`
+        .toLocaleLowerCase("es")
+        .includes(normalizedSearch),
+    );
+  }, [members, search]);
+
+  const activeCount = members.filter((member) => member.active).length;
+  const professionalCount = members.filter((member) => member.active && member.role === "professional").length;
+  const pendingCount = members.filter((member) => member.role === "pending").length;
+
+  async function saveMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) return;
+
+    const formData = new FormData(event.currentTarget);
+    const fullName = String(formData.get("fullName") || "").trim();
+    const role = String(formData.get("role") || editing.role) as StaffRole;
+    const active = editing.is_current_user ? true : formData.get("active") === "on";
+
+    setSaving(true);
+    setFormError("");
+    setSuccessMessage("");
+
+    const supabase = createClient();
+    const { error } = await supabase.rpc("update_staff_as_administrator", {
+      staff_uuid: editing.id,
+      new_full_name: fullName,
+      new_role: role,
+      new_active: active,
+    });
+
+    if (error) {
+      const message = error.message;
+      setFormError(
+        message.includes("cannot_remove_own_administrator_access")
+          ? "Tu propia cuenta debe conservar el rol de administración y permanecer activa."
+          : message.includes("last_administrator_required")
+            ? "Debe quedar al menos una cuenta administradora activa."
+            : "No pudimos guardar los cambios. Revisá los datos e intentá nuevamente.",
+      );
+      setSaving(false);
+      return;
+    }
+
+    setMembers((current) => current.map((member) =>
+      member.id === editing.id ? { ...member, full_name: fullName, role, active } : member,
+    ));
+    setSuccessMessage(`Se actualizó el acceso de ${fullName}.`);
+    setSaving(false);
+    setEditing(null);
+  }
+
+  return (
+    <div className="standard-page staff-admin-page">
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">ADMINISTRACIÓN</p>
+          <h1>Usuarios</h1>
+          <p>Gestioná nombres, roles y accesos sin salir de la vista clínica.</p>
+        </div>
+        <button className="secondary-button" onClick={loadMembers} disabled={loading}>
+          {loading ? "Actualizando..." : "↻ Actualizar lista"}
+        </button>
+      </div>
+
+      <div className="staff-stats-grid">
+        <Stat icon="✓" value={loading ? "—" : String(activeCount)} label="Cuentas activas" detail={`${members.length} registradas`} tone="green" />
+        <Stat icon="＋" value={loading ? "—" : String(professionalCount)} label="Profesionales" detail="Con acceso clínico" tone="wine" />
+        <Stat icon="◷" value={loading ? "—" : String(pendingCount)} label="Pendientes" detail="Esperan asignación" tone="sand" />
+      </div>
+
+      <div className="staff-admin-note">
+        <span>◇</span>
+        <div>
+          <strong>Alta y baja seguras</strong>
+          <p>Las cuentas creadas o invitadas desde Supabase aparecerán como pendientes. Desde acá asignás su rol, las activás o realizás una baja lógica para conservar la trazabilidad.</p>
+        </div>
+      </div>
+
+      {loadError && <div className="data-error" role="alert">{loadError}</div>}
+      {successMessage && <div className="data-success" role="status">{successMessage}</div>}
+
+      <section className="card staff-table-card">
+        <div className="table-tools">
+          <label>
+            <span>⌕</span>
+            <input
+              placeholder="Buscar por nombre, correo o rol"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="staff-table-head">
+          <span>Usuario</span><span>Rol</span><span>Estado</span><span>Último acceso</span><span />
+        </div>
+        <div className="staff-table">
+          {filteredMembers.map((member) => (
+            <button
+              className="staff-row"
+              key={member.id}
+              onClick={() => { setFormError(""); setSuccessMessage(""); setEditing(member); }}
+            >
+              <span className="staff-identity">
+                <i className="avatar">{member.full_name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "US"}</i>
+                <span>
+                  <strong>{member.full_name || "Sin nombre"}</strong>
+                  <small>{member.email}{member.is_current_user ? " · Tu cuenta" : ""}</small>
+                </span>
+              </span>
+              <span className={`staff-role staff-role-${member.role}`}>{staffRoleLabels[member.role]}</span>
+              <span className={`staff-state ${member.active ? "is-active" : "is-inactive"}`}>
+                {member.active ? "Activo" : "Inactivo"}
+              </span>
+              <span>{formatStaffDate(member.last_sign_in_at)}</span>
+              <span>Editar ›</span>
+            </button>
+          ))}
+          {!loading && filteredMembers.length === 0 && (
+            <div className="empty-state">
+              <span>⌕</span>
+              <h3>No encontramos usuarios</h3>
+              <p>Probá con otro nombre, correo o rol.</p>
+            </div>
+          )}
+          {loading && (
+            <div className="empty-state">
+              <span>◷</span>
+              <h3>Cargando usuarios</h3>
+              <p>Estamos consultando las cuentas autorizadas.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {editing && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) setEditing(null); }}>
+          <section className="modal staff-modal" role="dialog" aria-modal="true" aria-labelledby="staff-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">ABM DE USUARIOS</p>
+                <h2 id="staff-modal-title">Editar acceso</h2>
+                <small className="modal-subtitle">{editing.email}</small>
+              </div>
+              <button onClick={() => setEditing(null)} aria-label="Cerrar" disabled={saving}>×</button>
+            </div>
+            <form onSubmit={saveMember}>
+              <div className="form-grid">
+                <label className="wide">Nombre visible<input name="fullName" required maxLength={120} defaultValue={editing.full_name} /></label>
+                <label className="wide">Rol
+                  <select name="role" defaultValue={editing.role} disabled={editing.is_current_user}>
+                    <option value="pending">Pendiente</option>
+                    <option value="secretary">Secretaría</option>
+                    <option value="professional">Profesional</option>
+                    <option value="administrator">Administración</option>
+                  </select>
+                </label>
+              </div>
+              <label className={`staff-active-toggle ${editing.is_current_user ? "is-locked" : ""}`}>
+                <input name="active" type="checkbox" defaultChecked={editing.active} disabled={editing.is_current_user} />
+                <span><strong>Cuenta activa</strong><small>Al desactivarla, la persona ya no podrá ingresar.</small></span>
+              </label>
+              {editing.is_current_user && <p className="form-hint">Para evitar perder el acceso, tu propia cuenta conserva el rol de administración y permanece activa.</p>}
+              {formError && <div className="data-error modal-error" role="alert">{formError}</div>}
+              <div className="form-actions">
+                <button type="button" className="secondary-button" onClick={() => setEditing(null)} disabled={saving}>Cancelar</button>
+                <button className="primary-button" disabled={saving}>{saving ? "Guardando..." : "Guardar cambios"}</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PatientModal({ patient, contactOnly, saving, error, onClose, onSubmit }: { patient: Patient | null; contactOnly: boolean; saving: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {

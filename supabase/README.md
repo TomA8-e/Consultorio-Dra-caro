@@ -9,6 +9,7 @@ Aplicar en orden los archivos de `migrations`:
 3. `20260723180000_secretary_role_boundaries.sql`
 4. `20260723193000_fixed_appointment_duration.sql`
 5. `20260724190000_admin_patient_deletion.sql`
+6. `20260724220000_administrator_staff_management.sql`
 
 No volver a ejecutar la migración inicial sobre una base ya configurada.
 
