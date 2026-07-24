@@ -42,8 +42,10 @@ Las cuentas nuevas quedan con rol `pending` hasta ser aprobadas.
 
 ## Recuperación
 
-- Para correos reales, configurar el dominio público y las URL de redirección
-  de Auth antes de habilitar recuperación por email.
+- Para correos reales, configurar el dominio público y autorizar
+  `https://DOMINIO/actualizar-clave` en **Authentication > URL Configuration**.
+- La aplicación solicita el enlace desde `/recuperar-clave` y completa el
+  cambio en `/actualizar-clave`.
 - Para correos ficticios, una persona con acceso administrativo a Supabase debe
   establecer una nueva contraseña desde **Authentication > Users**.
 - Nunca guardar contraseñas ni claves `service_role` en este repositorio.

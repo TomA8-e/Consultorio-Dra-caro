@@ -45,7 +45,12 @@ triggers de Supabase.
 ## Recuperación de cuentas
 
 Las cuentas con correo real pueden usar el flujo de recuperación de Supabase
-cuando esté configurado. Las cuentas con correo ficticio sólo pueden recuperar
+desde **Olvidé mi contraseña** en la pantalla de acceso. Los enlaces de
+invitación y recuperación terminan en `/actualizar-clave`, donde se solicita
+una contraseña nueva de al menos 12 caracteres.
+
+La URL pública completa de `/actualizar-clave` debe estar incluida en las
+Redirect URLs de Supabase. Las cuentas con correo ficticio sólo pueden recuperar
 el acceso mediante un cambio de contraseña realizado por una persona
 administradora desde Supabase.
 

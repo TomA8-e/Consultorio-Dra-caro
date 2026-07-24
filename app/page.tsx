@@ -10,7 +10,12 @@ const roleLabels: Record<string, string> = {
   administrator: "Administración",
 };
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ code?: string }> }) {
+  const params = await searchParams;
+  if (params.code) {
+    redirect(`/actualizar-clave?code=${encodeURIComponent(params.code)}`);
+  }
+
   const supabase = await createClient();
   const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
   const userId = claimsData?.claims?.sub;

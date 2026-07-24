@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import styles from "./login.module.css";
@@ -13,6 +14,16 @@ export default function LoginForm({ accessError = false }: { accessError?: boole
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(accessError ? "La cuenta todavía no tiene permiso para acceder al consultorio." : "");
+
+  useEffect(() => {
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const query = new URLSearchParams(window.location.search);
+    const authType = hash.get("type");
+
+    if (query.has("code") || authType === "invite" || authType === "recovery") {
+      window.location.replace(`/actualizar-clave${window.location.search}${window.location.hash}`);
+    }
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -101,6 +112,7 @@ export default function LoginForm({ accessError = false }: { accessError?: boole
             {loading ? "Ingresando..." : "Ingresar"}
           </button>
 
+          <Link className={styles.authLink} href="/recuperar-clave">Olvidé mi contraseña</Link>
           <p className={styles.help}>Si no podés ingresar, contactá a la administración del consultorio.</p>
         </form>
       </section>
