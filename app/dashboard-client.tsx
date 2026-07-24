@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 
 type Section = "inicio" | "agenda" | "pacientes" | "historia" | "usuarios";
 type AppointmentStatus = "Confirmado" | "Pendiente" | "Presente" | "En espera" | "Atendido" | "Cancelado" | "Ausente";
+type ThemePreference = "light" | "dark" | "system";
 
 type Appointment = {
   id: string;
@@ -200,6 +201,98 @@ const administratorNavItem: { id: Section; label: string; icon: string } = {
   label: "Usuarios",
   icon: "♙",
 };
+
+const themeOptions: { value: ThemePreference; label: string; icon: string }[] = [
+  { value: "light", label: "Claro", icon: "☀" },
+  { value: "dark", label: "Oscuro", icon: "☾" },
+  { value: "system", label: "Sistema", icon: "◐" },
+];
+
+function applyThemePreference(preference: ThemePreference) {
+  const resolvedTheme = preference === "system"
+    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : preference;
+
+  document.documentElement.dataset.theme = resolvedTheme;
+  document.documentElement.dataset.themePreference = preference;
+  document.documentElement.style.colorScheme = resolvedTheme;
+}
+
+function ThemeSwitcher() {
+  const [preference, setPreference] = useState<ThemePreference>("system");
+  const [open, setOpen] = useState(false);
+  const selectedTheme = themeOptions.find((option) => option.value === preference) || themeOptions[2];
+
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem("consultorio-theme");
+    const initialPreference = themeOptions.some((option) => option.value === storedTheme)
+      ? storedTheme as ThemePreference
+      : "system";
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleSystemChange = () => {
+      const currentPreference = window.localStorage.getItem("consultorio-theme");
+      if (!currentPreference || currentPreference === "system") {
+        applyThemePreference("system");
+      }
+    };
+
+    const preferenceUpdate = window.setTimeout(() => setPreference(initialPreference), 0);
+    applyThemePreference(initialPreference);
+    mediaQuery.addEventListener("change", handleSystemChange);
+
+    return () => {
+      window.clearTimeout(preferenceUpdate);
+      mediaQuery.removeEventListener("change", handleSystemChange);
+    };
+  }, []);
+
+  function selectTheme(nextPreference: ThemePreference) {
+    window.localStorage.setItem("consultorio-theme", nextPreference);
+    setPreference(nextPreference);
+    applyThemePreference(nextPreference);
+    setOpen(false);
+  }
+
+  return (
+    <div className="theme-switcher" onKeyDown={(event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }}>
+      <button
+        type="button"
+        className="theme-trigger"
+        aria-label={`Apariencia: ${selectedTheme.label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span aria-hidden="true">{selectedTheme.icon}</span>
+        <span className="theme-trigger-label">Apariencia</span>
+        <b aria-hidden="true">⌄</b>
+      </button>
+      {open && (
+        <div className="theme-menu" role="menu" aria-label="Cambiar apariencia">
+          <span className="theme-menu-title">Apariencia</span>
+          {themeOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={preference === option.value ? "theme-option active" : "theme-option"}
+              role="menuitemradio"
+              aria-checked={preference === option.value}
+              onClick={() => selectTheme(option.value)}
+            >
+              <span aria-hidden="true">{option.icon}</span>
+              <span>{option.label}</span>
+              <b aria-hidden="true">{preference === option.value ? "✓" : ""}</b>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DashboardClient({
   profileName,
@@ -616,6 +709,7 @@ export default function DashboardClient({
             <span>⌕</span>
             <input aria-label="Buscar pacientes" placeholder="Buscar paciente por nombre o DNI..." value={search} onChange={(e) => setSearch(e.target.value)} onFocus={() => navigateTo("pacientes")} />
           </div>
+          <ThemeSwitcher />
           <button className="primary-button" onClick={openNewAppointment}><span>＋</span> Nuevo turno</button>
         </header>
 

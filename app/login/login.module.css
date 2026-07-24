@@ -103,3 +103,59 @@
     background:#fffdf9;
   }
 }
+
+:global(html[data-theme="dark"]) .page { background:#151115; }
+:global(html[data-theme="dark"]) .intro {
+  background:
+    radial-gradient(circle at 85% 12%,#ffffff0e 0,transparent 19rem),
+    linear-gradient(155deg,#33101e 0%,#1d0b12 72%);
+}
+:global(html[data-theme="dark"]) .formSide {
+  background:
+    radial-gradient(circle at 80% 6%,#40222c26 0,transparent 20rem),
+    #151115;
+}
+:global(html[data-theme="dark"]) .formCard {
+  color:#f4edf0;
+  border-color:#493a41;
+  background:#21191e;
+  box-shadow:0 20px 55px #00000052;
+}
+:global(html[data-theme="dark"]) .formCard > .kicker,
+:global(html[data-theme="dark"]) .passwordField button,
+:global(html[data-theme="dark"]) .authLink { color:#e4a4b9; }
+:global(html[data-theme="dark"]) .formCard h2 { color:#f4edf0; }
+:global(html[data-theme="dark"]) .formIntro,
+:global(html[data-theme="dark"]) .requirements,
+:global(html[data-theme="dark"]) .help { color:#bcaeb3; }
+:global(html[data-theme="dark"]) .formCard label { color:#dbd0d4; }
+:global(html[data-theme="dark"]) .formCard label > input,
+:global(html[data-theme="dark"]) .passwordField {
+  color:#f4edf0;
+  border-color:#4b3a42;
+  background:#1a1418;
+}
+:global(html[data-theme="dark"]) .formCard input::placeholder { color:#8f8086; }
+:global(html[data-theme="dark"]) .formCard label > input:focus,
+:global(html[data-theme="dark"]) .passwordField:focus-within {
+  border-color:#c27893;
+  box-shadow:0 0 0 4px #c2789326;
+}
+:global(html[data-theme="dark"]) .error {
+  color:#f0a5b3;
+  border-color:#673b46;
+  background:#3a2229;
+}
+:global(html[data-theme="dark"]) .success {
+  color:#a4ceb0;
+  border-color:#365742;
+  background:#20342a;
+}
+
+@media (max-width:850px) {
+  :global(html[data-theme="dark"]) .formSide { background:#151115; }
+  :global(html[data-theme="dark"]) .mobileBrand {
+    border-color:#493a41;
+    background:#fffdf9;
+  }
+}
