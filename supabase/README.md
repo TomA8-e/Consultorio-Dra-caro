@@ -1,30 +1,58 @@
-# Configuración inicial de Supabase
+# Supabase
 
-## 1. Crear el esquema
+## Migraciones
 
-1. Abrir el proyecto en Supabase.
-2. Entrar en **SQL Editor**.
-3. Crear una consulta nueva.
-4. Copiar todo el contenido de `migrations/20260722190000_initial_schema.sql`.
-5. Presionar **Run** una sola vez.
+Aplicar en orden los archivos de `migrations`:
 
-El script crea las tablas, relaciones, índices, auditoría y políticas RLS.
+1. `20260722190000_initial_schema.sql`
+2. `20260723123000_appointment_editing_and_overlap.sql`
+3. `20260723180000_secretary_role_boundaries.sql`
+4. `20260723193000_fixed_appointment_duration.sql`
+5. `20260724190000_admin_patient_deletion.sql`
 
-## 2. Crear la primera profesional
+No volver a ejecutar la migración inicial sobre una base ya configurada.
 
-1. Entrar en **Authentication > Users**.
-2. Crear la cuenta de la doctora mediante **Add user**.
-3. Abrir `bootstrap-first-user.sql`.
-4. Reemplazar `REEMPLAZAR_CON_EMAIL_DE_LA_DOCTORA` por el correo de esa cuenta.
-5. Ejecutar el archivo desde SQL Editor.
+## Alta de usuarios
 
-Las cuentas nuevas quedan con rol `pending` hasta que un administrador las
-aprueba. Esto evita que una cuenta recién creada pueda acceder a información
-del consultorio.
+1. Crear el usuario desde **Authentication > Users**.
+2. Confirmar que se creó una fila asociada en `public.profiles`.
+3. Asignar `full_name`, `role` y `active = true` desde SQL Editor.
 
-## Importante
+Ejemplo:
 
-- No ejecutar el archivo de migración inicial más de una vez.
-- No utilizar pacientes reales durante el desarrollo.
-- No colocar claves `secret` o `service_role` en el navegador ni en variables
-  que comiencen con `NEXT_PUBLIC_`.
+```sql
+update public.profiles as profile
+set
+  full_name = 'Nombre visible',
+  role = 'professional',
+  active = true
+from auth.users as auth_user
+where profile.id = auth_user.id
+  and auth_user.email = 'correo@ejemplo.com';
+```
+
+Las cuentas nuevas quedan con rol `pending` hasta ser aprobadas.
+
+## Roles disponibles
+
+- `administrator`
+- `professional`
+- `secretary`
+- `pending`
+
+## Recuperación
+
+- Para correos reales, configurar el dominio público y las URL de redirección
+  de Auth antes de habilitar recuperación por email.
+- Para correos ficticios, una persona con acceso administrativo a Supabase debe
+  establecer una nueva contraseña desde **Authentication > Users**.
+- Nunca guardar contraseñas ni claves `service_role` en este repositorio.
+
+## Controles antes de usar datos reales
+
+- Revisar Security Advisor.
+- Confirmar RLS en todas las tablas públicas.
+- Probar con cada rol que los accesos clínicos estén bloqueados para Secretaría.
+- Confirmar que sólo Administración puede eliminar pacientes sin información
+  clínica; si existe historia clínica, la eliminación debe quedar bloqueada.
+- Configurar y ensayar copias de seguridad.

@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
-type Section = "inicio" | "agenda" | "pacientes" | "historia" | "configuracion";
+type Section = "inicio" | "agenda" | "pacientes" | "historia";
 type AppointmentStatus = "Confirmado" | "Pendiente" | "Presente" | "En espera" | "Atendido" | "Cancelado" | "Ausente";
 
 type Appointment = {
@@ -180,7 +180,6 @@ const navItems: { id: Section; label: string; icon: string }[] = [
   { id: "agenda", label: "Agenda", icon: "□" },
   { id: "pacientes", label: "Pacientes", icon: "◎" },
   { id: "historia", label: "Historia clínica", icon: "＋" },
-  { id: "configuracion", label: "Configuración", icon: "⚙" },
 ];
 
 export default function DashboardClient({
@@ -203,6 +202,8 @@ export default function DashboardClient({
   const [patientsLoading, setPatientsLoading] = useState(true);
   const [patientsError, setPatientsError] = useState("");
   const [patientSaving, setPatientSaving] = useState(false);
+  const [patientDeleting, setPatientDeleting] = useState(false);
+  const [patientDeleteError, setPatientDeleteError] = useState("");
   const [patientFormError, setPatientFormError] = useState("");
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [appointmentsLoading, setAppointmentsLoading] = useState(true);
@@ -214,6 +215,7 @@ export default function DashboardClient({
   const [appointmentWalkIn, setAppointmentWalkIn] = useState(false);
   const [agendaDate, setAgendaDate] = useState(todayInputValue);
   const isSecretary = profileRole === "secretary";
+  const isAdministrator = profileRole === "administrator";
   const accessibleNavItems = isSecretary
     ? navItems.filter((item) => item.id === "inicio" || item.id === "agenda" || item.id === "pacientes")
     : navItems;
@@ -287,7 +289,7 @@ export default function DashboardClient({
   }, [patients, search]);
 
   function navigateTo(nextSection: Section) {
-    const allowedSection = isSecretary && (nextSection === "historia" || nextSection === "configuracion")
+    const allowedSection = isSecretary && nextSection === "historia"
       ? "inicio"
       : nextSection;
     setSection(allowedSection);
@@ -508,6 +510,37 @@ export default function DashboardClient({
     setModal(null);
   }
 
+  async function deletePatient() {
+    if (!selectedPatient || !isAdministrator) return;
+    const confirmed = window.confirm(
+      `¿Eliminar definitivamente a ${selectedPatient.name}? También se eliminarán sus turnos. Esta acción no se puede deshacer.`,
+    );
+    if (!confirmed) return;
+
+    setPatientDeleting(true);
+    setPatientDeleteError("");
+    const patientId = selectedPatient.id;
+    const supabase = createClient();
+    const { error } = await supabase.rpc("delete_patient_as_administrator", {
+      patient_uuid: patientId,
+    });
+
+    if (error) {
+      setPatientDeleteError(
+        error.message.includes("patient_has_clinical_history")
+          ? "No se puede eliminar una paciente que tenga información clínica registrada."
+          : "No pudimos eliminar la paciente. Verificá los permisos e intentá nuevamente.",
+      );
+      setPatientDeleting(false);
+      return;
+    }
+
+    setPatients((current) => current.filter((patient) => patient.id !== patientId));
+    setAppointments((current) => current.filter((appointment) => appointment.patientId !== patientId));
+    setPatientDeleting(false);
+    setSelectedPatient(null);
+  }
+
   async function changeAppointmentStatus(appointmentId: string, status: AppointmentStatus) {
     if (isSecretary && status === "Atendido") {
       setAppointmentsError("El estado Atendido debe registrarlo el profesional.");
@@ -546,10 +579,6 @@ export default function DashboardClient({
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <span>●</span>
-          <div><strong>Modo demostración</strong><small>No cargar datos reales</small></div>
-        </div>
         <button className="profile-card" onClick={handleSignOut} disabled={signingOut} title="Cerrar sesión">
           <span className="avatar avatar-dark">DA</span>
           <span><strong>{profileName}</strong><small>{signingOut ? "Cerrando sesión..." : roleLabel}</small></span>
@@ -566,7 +595,6 @@ export default function DashboardClient({
             <span>⌕</span>
             <input aria-label="Buscar pacientes" placeholder="Buscar paciente por nombre o DNI..." value={search} onChange={(e) => setSearch(e.target.value)} onFocus={() => navigateTo("pacientes")} />
           </div>
-          <button className="icon-button" aria-label="Notificaciones">♢<i /></button>
           <button className="primary-button" onClick={openNewAppointment}><span>＋</span> Nuevo turno</button>
         </header>
 
@@ -575,7 +603,6 @@ export default function DashboardClient({
           {section === "agenda" && <Agenda selectedDate={agendaDate} onDateChange={setAgendaDate} appointments={appointments} loading={appointmentsLoading} loadError={appointmentsError} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onEditAppointment={openEditAppointment} onNewAppointment={openNewAppointment} onWalkIn={openWalkInAppointment} canMarkAttended={!isSecretary} />}
           {section === "pacientes" && <Patients patients={filteredPatients} loading={patientsLoading} loadError={patientsError} search={search} setSearch={setSearch} onNewPatient={openNewPatient} onSelect={setSelectedPatient} />}
           {section === "historia" && <ClinicalHistory patients={patients} onSelect={setSelectedPatient} />}
-          {section === "configuracion" && <Settings />}
         </div>
       </section>
 
@@ -587,7 +614,7 @@ export default function DashboardClient({
 
       {modal === "patient" && <PatientModal patient={editingPatient} contactOnly={isSecretary && Boolean(editingPatient)} saving={patientSaving} error={patientFormError} onClose={() => { if (!patientSaving) { setEditingPatient(null); setModal(null); } }} onSubmit={savePatient} />}
       {modal === "appointment" && <AppointmentModal patients={patients} appointment={editingAppointment} isWalkIn={appointmentWalkIn} defaultDate={agendaDate} saving={appointmentSaving || appointmentDeleting} deleting={appointmentDeleting} canDelete={!isSecretary} error={appointmentFormError} onClose={() => { if (!appointmentSaving && !appointmentDeleting) { setEditingAppointment(null); setAppointmentWalkIn(false); setModal(null); } }} onSubmit={saveAppointment} onDelete={deleteAppointment} />}
-      {selectedPatient && <PatientDrawer patient={selectedPatient} profileName={profileName} profileRole={profileRole} onEdit={() => openEditPatient(selectedPatient)} onClose={() => setSelectedPatient(null)} />}
+      {selectedPatient && <PatientDrawer patient={selectedPatient} profileName={profileName} profileRole={profileRole} deleting={patientDeleting} deleteError={patientDeleteError} onDelete={deletePatient} onEdit={() => openEditPatient(selectedPatient)} onClose={() => { if (!patientDeleting) { setPatientDeleteError(""); setSelectedPatient(null); } }} />}
     </main>
   );
 }
@@ -602,10 +629,8 @@ function Dashboard({ profileName, isSecretary, patientCount, patientsLoading, pa
   const todayLabel = new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
   return <>
-    <div className="demo-banner"><strong>Versión de demostración</strong><span>Los datos que ves son ficticios. No cargues información real de pacientes.</span></div>
     <div className="page-heading">
       <div><p className="eyebrow">{todayLabel.toUpperCase()}</p><h1>Buen día, {profileName}</h1><p>Este es el resumen de tu consultorio para hoy.</p></div>
-      <button className="secondary-button">Imprimir agenda</button>
     </div>
     <div className="stats-grid">
       <Stat icon="▣" value={appointmentsLoading ? "—" : String(appointments.length)} label="Turnos de hoy" detail={appointmentsLoading ? "Cargando agenda" : `${confirmedCount} confirmados`} tone="wine" />
@@ -663,15 +688,11 @@ function Agenda({ selectedDate, onDateChange, appointments, loading, loadError, 
 }
 
 function Patients({ patients, loading, loadError, search, setSearch, onNewPatient, onSelect }: { patients: Patient[]; loading: boolean; loadError: string; search: string; setSearch: (value: string) => void; onNewPatient: () => void; onSelect: (patient: Patient) => void }) {
-  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">REGISTROS</p><h1>Pacientes</h1><p>{loading ? "Cargando fichas..." : `${patients.length} fichas registradas.`}</p></div><button className="primary-button" onClick={onNewPatient}>＋ Nueva paciente</button></div>{loadError && <div className="data-error" role="alert">{loadError}</div>}<section className="card patient-table-card"><div className="table-tools"><label><span>⌕</span><input placeholder="Buscar por nombre o DNI" value={search} onChange={(e) => setSearch(e.target.value)} /></label><button className="secondary-button">Filtros</button></div><div className="patient-table"><div className="patient-table-head"><span>Paciente</span><span>DNI</span><span>Contacto</span><span>Última consulta</span><span>Próximo turno</span><span /></div>{patients.map((patient) => <button className="patient-row" key={patient.id} onClick={() => onSelect(patient)}><span className="patient-name"><i className="avatar">{patient.initials}</i><span><strong>{patient.name}</strong><small>{patient.age} años</small></span></span><span>{patient.dni}</span><span>{patient.phone}</span><span>{patient.lastVisit}</span><span className="next-visit">{patient.nextVisit}</span><span>›</span></button>)}{!loading && patients.length === 0 && <div className="empty-state"><span>⌕</span><h3>{search ? "No encontramos pacientes" : "Todavía no hay pacientes"}</h3><p>{search ? "Probá con otro nombre o número de DNI." : "Usá “Nueva paciente” para crear la primera ficha."}</p></div>}{loading && <div className="empty-state"><span>◷</span><h3>Cargando pacientes</h3><p>Estamos consultando la base de datos.</p></div>}</div></section></div>;
+  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">REGISTROS</p><h1>Pacientes</h1><p>{loading ? "Cargando fichas..." : `${patients.length} fichas registradas.`}</p></div><button className="primary-button" onClick={onNewPatient}>＋ Nueva paciente</button></div>{loadError && <div className="data-error" role="alert">{loadError}</div>}<section className="card patient-table-card"><div className="table-tools"><label><span>⌕</span><input placeholder="Buscar por nombre o DNI" value={search} onChange={(e) => setSearch(e.target.value)} /></label></div><div className="patient-table"><div className="patient-table-head"><span>Paciente</span><span>DNI</span><span>Contacto</span><span>Última consulta</span><span>Próximo turno</span><span /></div>{patients.map((patient) => <button className="patient-row" key={patient.id} onClick={() => onSelect(patient)}><span className="patient-name"><i className="avatar">{patient.initials}</i><span><strong>{patient.name}</strong><small>{patient.age} años</small></span></span><span>{patient.dni}</span><span>{patient.phone}</span><span>{patient.lastVisit}</span><span className="next-visit">{patient.nextVisit}</span><span>›</span></button>)}{!loading && patients.length === 0 && <div className="empty-state"><span>⌕</span><h3>{search ? "No encontramos pacientes" : "Todavía no hay pacientes"}</h3><p>{search ? "Probá con otro nombre o número de DNI." : "Usá “Nueva paciente” para crear la primera ficha."}</p></div>}{loading && <div className="empty-state"><span>◷</span><h3>Cargando pacientes</h3><p>Estamos consultando la base de datos.</p></div>}</div></section></div>;
 }
 
 function ClinicalHistory({ patients, onSelect }: { patients: Patient[]; onSelect: (patient: Patient) => void }) {
   return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">INFORMACIÓN CLÍNICA</p><h1>Historia clínica</h1><p>Acceso reservado exclusivamente a profesionales autorizados.</p></div></div><div className="privacy-card"><span>◇</span><div><strong>Información especialmente protegida</strong><p>Los registros clínicos finalizados conservarán su historial. Las correcciones se agregarán como nuevas versiones.</p></div></div><section className="card history-list"><div className="card-header"><div><h2>Seleccionar paciente</h2><p>Abrí una ficha para consultar su línea de tiempo clínica.</p></div></div>{patients.slice(0, 4).map((patient) => <button key={patient.id} onClick={() => onSelect(patient)}><span className="avatar">{patient.initials}</span><span><strong>{patient.name}</strong><small>Última consulta: {patient.lastVisit}</small></span><b>Abrir historia →</b></button>)}</section></div>;
-}
-
-function Settings() {
-  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">PREFERENCIAS</p><h1>Configuración</h1><p>Datos generales y horarios del consultorio.</p></div></div><section className="card settings-card"><h2>Datos del consultorio</h2><div className="form-grid"><label>Nombre<input defaultValue="Consultorio Adri Caro" /></label><label>Especialidad<input defaultValue="Ginecología" /></label><label>Zona horaria<input defaultValue="Buenos Aires (GMT-3)" disabled /></label></div><div className="form-actions"><button className="primary-button">Guardar cambios</button></div></section></div>;
 }
 
 function PatientModal({ patient, contactOnly, saving, error, onClose, onSubmit }: { patient: Patient | null; contactOnly: boolean; saving: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
@@ -688,8 +709,9 @@ function AppointmentModal({ patients, appointment, isWalkIn, defaultDate, saving
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="appointment-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">{isWalkIn ? "RECEPCIÓN" : "AGENDA"}</p><h2 id="appointment-modal-title">{editing ? "Editar turno" : isWalkIn ? "Paciente sin turno" : "Nuevo turno"}</h2>{isWalkIn && <small className="modal-subtitle">Se registrará como presente en la agenda de hoy.</small>}</div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label className="wide">Paciente<select name="patientId" required defaultValue={appointment?.patientId || ""}><option value="" disabled>{patients.length ? "Seleccionar paciente" : "Primero registrá una paciente"}</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}</select></label><label>Fecha<input name="date" type="date" required defaultValue={selectedDate} /></label><label>Horario<input name="time" type="time" required defaultValue={selectedTime} /></label><label>Tipo de consulta<select name="consultationType" defaultValue={appointment?.type || "Control ginecológico"}><option>Control ginecológico</option><option>Primera consulta</option><option>PAP y control</option><option>Colposcopía</option><option>Control de embarazo</option><option>Procedimiento</option></select></label><label className="wide">Nota administrativa<input name="administrativeNotes" maxLength={500} placeholder="Opcional. No incluir información clínica sensible." defaultValue={appointment?.administrativeNotes || ""} /></label></div>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className={`form-actions ${editing && canDelete ? "form-actions-between" : ""}`}>{editing && canDelete && <button type="button" className="danger-button" onClick={onDelete} disabled={saving}>{deleting ? "Eliminando..." : "Eliminar turno"}</button>}<div className="form-actions-group"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving || patients.length === 0}>{saving && !deleting ? "Guardando..." : editing ? "Guardar cambios" : isWalkIn ? "Agregar a la agenda" : "Guardar turno"}</button></div></div></form></section></div>;
 }
 
-function PatientDrawer({ patient, profileName, profileRole, onEdit, onClose }: { patient: Patient; profileName: string; profileRole: string; onEdit: () => void; onClose: () => void }) {
+function PatientDrawer({ patient, profileName, profileRole, deleting, deleteError, onDelete, onEdit, onClose }: { patient: Patient; profileName: string; profileRole: string; deleting: boolean; deleteError: string; onDelete: () => void; onEdit: () => void; onClose: () => void }) {
   const clinicalAccess = profileRole === "professional" || profileRole === "administrator";
+  const canDelete = profileRole === "administrator";
   const [tab, setTab] = useState<"summary" | "history" | "gynecology">("summary");
   const [entries, setEntries] = useState<ClinicalEntry[]>([]);
   const [gynecologicalHistory, setGynecologicalHistory] = useState<GynecologicalHistory | null>(null);
@@ -853,7 +875,8 @@ function PatientDrawer({ patient, profileName, profileRole, onEdit, onClose }: {
       <aside className="patient-drawer" onMouseDown={(event) => event.stopPropagation()}>
         <div className="drawer-top"><button onClick={onClose}>← Volver</button><button onClick={onEdit}>{clinicalAccess ? "Editar datos" : "Editar contacto"}</button></div>
         <div className="drawer-patient"><span className="avatar avatar-xl">{patient.initials}</span><h2>{patient.name}</h2><p>DNI {patient.dni} · {patient.age} años</p><span className="status status-confirmed">Ficha activa</span></div>
-        <div className="drawer-actions">{clinicalAccess && <button className="primary-button" onClick={() => { setConsultationError(""); setConsultationOpen(true); }}>＋ Nueva consulta</button>}<button className="secondary-button" onClick={onEdit}>{clinicalAccess ? "Editar paciente" : "Editar contacto"}</button></div>
+        <div className="drawer-actions">{clinicalAccess && <button className="primary-button" onClick={() => { setConsultationError(""); setConsultationOpen(true); }} disabled={deleting}>＋ Nueva consulta</button>}<button className="secondary-button" onClick={onEdit} disabled={deleting}>{clinicalAccess ? "Editar paciente" : "Editar contacto"}</button>{canDelete && <button className="danger-button" onClick={onDelete} disabled={deleting}>{deleting ? "Eliminando..." : "Eliminar paciente"}</button>}</div>
+        {deleteError && <div className="data-error drawer-error" role="alert">{deleteError}</div>}
         <div className="drawer-tabs"><button className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>Resumen</button>{clinicalAccess && <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Historia clínica</button>}{clinicalAccess && <button className={tab === "gynecology" ? "active" : ""} onClick={() => setTab("gynecology")}>Ginecología</button>}</div>
         {clinicalError && <div className="data-error drawer-error">{clinicalError}</div>}
         {tab === "summary" && (clinicalAccess ? <section className="clinical-summary"><h3>Resumen de la paciente</h3><div className="info-grid"><span><small>Teléfono</small><strong>{patient.phone}</strong></span><span><small>Última consulta</small><strong>{lastEntry ? new Date(lastEntry.consultation_date).toLocaleDateString("es-AR") : "Sin consultas"}</strong></span><span><small>Próximo turno</small><strong>{patient.nextVisit}</strong></span><span><small>Estado clínico</small><strong>{clinicalLoading ? "Cargando..." : `${entries.length} consultas`}</strong></span></div><h3>Última consulta</h3>{lastEntry ? <ClinicalTimelineEntry entry={lastEntry} profileName={profileName} /> : <div className="compact-empty">Todavía no hay consultas registradas.</div>}</section> : <section className="clinical-summary"><h3>Datos administrativos</h3><div className="info-grid"><span><small>Teléfono</small><strong>{patient.phone}</strong></span><span><small>DNI</small><strong>{patient.dni}</strong></span><span><small>Edad</small><strong>{patient.age} años</strong></span><span><small>Próximo turno</small><strong>{patient.nextVisit}</strong></span></div><div className="privacy-card"><span>◇</span><div><strong>Acceso administrativo</strong><p>La historia clínica y los antecedentes médicos están reservados al profesional.</p></div></div></section>)}

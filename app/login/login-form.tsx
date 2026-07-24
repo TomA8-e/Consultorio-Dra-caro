@@ -103,7 +103,6 @@ export default function LoginForm({ accessError = false }: { accessError?: boole
 
           <p className={styles.help}>Si no podés ingresar, contactá a la administración del consultorio.</p>
         </form>
-        <p className={styles.demo}>Versión en desarrollo · No cargar datos reales</p>
       </section>
     </main>
   );
