@@ -23,7 +23,11 @@ export default function RecoveryForm() {
     });
 
     if (recoveryError) {
-      setError("No pudimos enviar el correo en este momento. Esperá unos minutos e intentá nuevamente.");
+      setError(
+        recoveryError.status === 429
+          ? "Se alcanzó el límite temporal de correos de Supabase. Esperá antes de volver a solicitar otro enlace."
+          : "No pudimos enviar el correo en este momento. Esperá unos minutos e intentá nuevamente.",
+      );
       setSending(false);
       return;
     }
