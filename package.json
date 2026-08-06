@@ -9,7 +9,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern .next",
+    "test": "node --experimental-strip-types --test tests/patient-validation.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",

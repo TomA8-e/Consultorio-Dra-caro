@@ -3,6 +3,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
+import {
+  hasDuplicateDni,
+  localDateInputValue,
+  patientSaveErrorMessage,
+  validatePatientDraft,
+} from "@/lib/patient-validation";
 
 type Section = "inicio" | "agenda" | "pacientes" | "historia" | "usuarios";
 type AppointmentStatus = "Confirmado" | "Pendiente" | "Presente" | "En espera" | "Atendido" | "Cancelado" | "Ausente";
@@ -336,26 +342,55 @@ export default function DashboardClient({
 
   useEffect(() => {
     let mounted = true;
+    let requestInFlight = false;
+    const supabase = createClient();
 
-    async function loadPatients() {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from("patients")
-        .select("id, first_name, last_name, dni, birth_date, phone")
-        .order("last_name", { ascending: true });
+    async function loadPatients(showError: boolean) {
+      if (requestInFlight) return;
+      requestInFlight = true;
 
-      if (!mounted) return;
+      try {
+        const { data, error } = await supabase
+          .from("patients")
+          .select("id, first_name, last_name, dni, birth_date, phone")
+          .order("last_name", { ascending: true });
 
-      if (error) {
-        setPatientsError("No pudimos cargar las pacientes. Volvé a intentar en unos segundos.");
-      } else {
-        setPatients((data || []).map((row) => mapPatient(row as PatientRow)));
+        if (!mounted) return;
+
+        if (error) {
+          if (showError) {
+            setPatientsError("No pudimos cargar las pacientes. Volvé a intentar en unos segundos.");
+          }
+        } else {
+          setPatients((data || []).map((row) => mapPatient(row as PatientRow)));
+          setPatientsError("");
+        }
+      } catch {
+        if (mounted && showError) {
+          setPatientsError("No pudimos conectarnos para cargar las pacientes.");
+        }
+      } finally {
+        requestInFlight = false;
+        if (mounted) setPatientsLoading(false);
       }
-      setPatientsLoading(false);
     }
 
-    loadPatients();
-    return () => { mounted = false; };
+    const refreshPatients = () => { void loadPatients(false); };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshPatients();
+    };
+
+    void loadPatients(true);
+    const refreshInterval = window.setInterval(refreshPatients, 30_000);
+    window.addEventListener("focus", refreshPatients);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(refreshInterval);
+      window.removeEventListener("focus", refreshPatients);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -447,57 +482,72 @@ export default function DashboardClient({
 
   async function savePatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPatientSaving(true);
     setPatientFormError("");
     const data = new FormData(event.currentTarget);
-    const supabase = createClient();
-    const phone = String(data.get("phone") || "").trim() || null;
-    const patientValues = {
-      first_name: String(data.get("firstName") || "").trim(),
-      last_name: String(data.get("lastName") || "").trim(),
-      dni: String(data.get("dni") || "").trim(),
-      birth_date: String(data.get("birthDate") || ""),
-      phone,
+    const patientDraft = {
+      firstName: String(data.get("firstName") || editingPatient?.firstName || ""),
+      lastName: String(data.get("lastName") || editingPatient?.lastName || ""),
+      dni: String(data.get("dni") || editingPatient?.dni || ""),
+      birthDate: String(data.get("birthDate") || editingPatient?.birthDate || ""),
+      phone: String(data.get("phone") || ""),
     };
-    const saveResult = editingPatient
-      ? await supabase
-          .from("patients")
-          .update(isSecretary ? { phone } : patientValues)
-          .eq("id", editingPatient.id)
-          .select("id, first_name, last_name, dni, birth_date, phone")
-          .single()
-      : await supabase
-          .from("patients")
-          .insert(patientValues)
-          .select("id, first_name, last_name, dni, birth_date, phone")
-          .single();
-    const { data: savedPatient, error } = saveResult;
+    const validation = validatePatientDraft(patientDraft);
 
-    if (error || !savedPatient) {
-      setPatientFormError(
-        error?.code === "23505"
-          ? "Ya existe una paciente registrada con ese DNI."
-          : "No pudimos guardar los cambios. Revisá los datos e intentá nuevamente.",
-      );
-      setPatientSaving(false);
+    if (!validation.ok) {
+      setPatientFormError(validation.message);
       return;
     }
 
-    const mappedPatient = mapPatient(savedPatient as PatientRow);
-    setPatients((current) => editingPatient
-      ? current.map((patient) => patient.id === mappedPatient.id ? mappedPatient : patient)
-      : [mappedPatient, ...current],
-    );
-    setAppointments((current) => current.map((appointment) =>
-      appointment.patientId === mappedPatient.id
-        ? { ...appointment, patient: mappedPatient.name }
-        : appointment,
-    ));
-    setSelectedPatient((current) => current?.id === mappedPatient.id ? mappedPatient : current);
-    setPatientSaving(false);
-    setEditingPatient(null);
-    setModal(null);
-    setSection("pacientes");
+    if (hasDuplicateDni(patients, validation.values.dni, editingPatient?.id)) {
+      setPatientFormError("Ya existe una paciente registrada con ese DNI.");
+      return;
+    }
+
+    setPatientSaving(true);
+    const supabase = createClient();
+
+    try {
+      const saveResult = editingPatient
+        ? await supabase
+            .from("patients")
+            .update(isSecretary ? { phone: validation.values.phone } : validation.values)
+            .eq("id", editingPatient.id)
+            .select("id, first_name, last_name, dni, birth_date, phone")
+            .single()
+        : await supabase
+            .from("patients")
+            .insert(validation.values)
+            .select("id, first_name, last_name, dni, birth_date, phone")
+            .single();
+      const { data: savedPatient, error } = saveResult;
+
+      if (error || !savedPatient) {
+        console.error("patient_save_failed", { code: error?.code });
+        setPatientFormError(patientSaveErrorMessage(error));
+        return;
+      }
+
+      const mappedPatient = mapPatient(savedPatient as PatientRow);
+      setPatients((current) => editingPatient
+        ? current.map((patient) => patient.id === mappedPatient.id ? mappedPatient : patient)
+        : [mappedPatient, ...current],
+      );
+      setAppointments((current) => current.map((appointment) =>
+        appointment.patientId === mappedPatient.id
+          ? { ...appointment, patient: mappedPatient.name }
+          : appointment,
+      ));
+      setSelectedPatient((current) => current?.id === mappedPatient.id ? mappedPatient : current);
+      setEditingPatient(null);
+      setModal(null);
+      setSection("pacientes");
+    } catch (error) {
+      const safeError = error instanceof Error ? { message: error.message } : null;
+      console.error("patient_save_failed", { reason: "request_exception" });
+      setPatientFormError(patientSaveErrorMessage(safeError));
+    } finally {
+      setPatientSaving(false);
+    }
   }
 
   async function saveAppointment(event: FormEvent<HTMLFormElement>) {
@@ -1051,7 +1101,7 @@ function UserAdministration() {
 
 function PatientModal({ patient, contactOnly, saving, error, onClose, onSubmit }: { patient: Patient | null; contactOnly: boolean; saving: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   const editing = Boolean(patient);
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="patient-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">{contactOnly ? "DATOS ADMINISTRATIVOS" : editing ? "DATOS DE LA PACIENTE" : "NUEVO REGISTRO"}</p><h2 id="patient-modal-title">{contactOnly ? "Editar contacto" : editing ? "Editar paciente" : "Nueva paciente"}</h2></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label>Nombre<input name="firstName" required maxLength={100} placeholder="Ej. Ana" defaultValue={patient?.firstName || ""} disabled={contactOnly} /></label><label>Apellido<input name="lastName" required maxLength={100} placeholder="Ej. Martínez" defaultValue={patient?.lastName || ""} disabled={contactOnly} /></label><label>DNI<input name="dni" required maxLength={20} placeholder="00.000.000" defaultValue={patient?.dni || ""} disabled={contactOnly} /></label><label>Fecha de nacimiento<input name="birthDate" type="date" required max={new Date().toISOString().slice(0, 10)} defaultValue={patient?.birthDate || ""} disabled={contactOnly} /></label><label className="wide">Teléfono<input name="phone" maxLength={50} placeholder="11 0000-0000" defaultValue={patient?.phone === "Sin registrar" ? "" : patient?.phone || ""} /></label></div><p className="form-hint">{contactOnly ? "Secretaría sólo puede modificar datos de contacto. Los datos identificatorios están protegidos." : "Los antecedentes clínicos se completarán dentro de la ficha de la paciente."}</p>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving}>{saving ? "Guardando..." : editing ? "Guardar cambios" : "Guardar paciente"}</button></div></form></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="patient-modal-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">{contactOnly ? "DATOS ADMINISTRATIVOS" : editing ? "DATOS DE LA PACIENTE" : "NUEVO REGISTRO"}</p><h2 id="patient-modal-title">{contactOnly ? "Editar contacto" : editing ? "Editar paciente" : "Nueva paciente"}</h2></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><div className="form-grid"><label>Nombre<input name="firstName" required minLength={1} maxLength={100} autoCapitalize="words" placeholder="Ej. Ana" defaultValue={patient?.firstName || ""} disabled={contactOnly} /></label><label>Apellido<input name="lastName" required minLength={1} maxLength={100} autoCapitalize="words" placeholder="Ej. Martínez" defaultValue={patient?.lastName || ""} disabled={contactOnly} /></label><label>DNI<input name="dni" required minLength={6} maxLength={20} inputMode="numeric" autoComplete="off" placeholder="00.000.000" defaultValue={patient?.dni || ""} disabled={contactOnly} /></label><label>Fecha de nacimiento<input name="birthDate" type="date" required max={localDateInputValue()} defaultValue={patient?.birthDate || ""} disabled={contactOnly} /></label><label className="wide">Teléfono<input name="phone" maxLength={50} inputMode="tel" autoComplete="tel" placeholder="11 0000-0000" defaultValue={patient?.phone === "Sin registrar" ? "" : patient?.phone || ""} /></label></div><p className="form-hint">{contactOnly ? "Secretaría sólo puede modificar datos de contacto. Los datos identificatorios están protegidos." : "Podés escribir el DNI con o sin puntos. Los antecedentes clínicos se completarán dentro de la ficha."}</p>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" disabled={saving}>{saving ? "Guardando..." : editing ? "Guardar cambios" : "Guardar paciente"}</button></div></form></section></div>;
 }
 
 function AppointmentModal({ patients, appointment, isWalkIn, defaultDate, saving, deleting, canDelete, error, onClose, onSubmit, onDelete }: { patients: Patient[]; appointment: Appointment | null; isWalkIn: boolean; defaultDate: string; saving: boolean; deleting: boolean; canDelete: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onDelete: () => void }) {
