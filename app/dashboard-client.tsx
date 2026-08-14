@@ -3,16 +3,30 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
+import { hasAppointmentOverlap } from "@/lib/appointments";
 import {
   hasDuplicateDni,
   localDateInputValue,
   patientSaveErrorMessage,
   validatePatientDraft,
 } from "@/lib/patient-validation";
+import {
+  buildWhatsAppConfirmationUrl,
+  formatWhatsAppAppointmentDate,
+  normalizeWhatsAppPhone,
+} from "@/lib/whatsapp";
 
 type Section = "inicio" | "agenda" | "pacientes" | "historia" | "usuarios";
 type AppointmentStatus = "Confirmado" | "Pendiente" | "Presente" | "En espera" | "Atendido" | "Cancelado" | "Ausente";
 type ThemePreference = "light" | "dark" | "system";
+
+type WhatsAppBookingResult = {
+  patientName: string;
+  phone: string;
+  date: string;
+  time: string;
+  confirmationUrl: string;
+};
 
 type Appointment = {
   id: string;
@@ -312,7 +326,7 @@ export default function DashboardClient({
   const [section, setSection] = useState<Section>("inicio");
   const [patients, setPatients] = useState<Patient[]>([]);
   const [search, setSearch] = useState("");
-  const [modal, setModal] = useState<"patient" | "appointment" | null>(null);
+  const [modal, setModal] = useState<"patient" | "appointment" | "whatsapp" | null>(null);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -331,6 +345,9 @@ export default function DashboardClient({
   const [appointmentStatusUpdating, setAppointmentStatusUpdating] = useState<string | null>(null);
   const [appointmentDeleting, setAppointmentDeleting] = useState(false);
   const [appointmentWalkIn, setAppointmentWalkIn] = useState(false);
+  const [whatsAppSaving, setWhatsAppSaving] = useState(false);
+  const [whatsAppError, setWhatsAppError] = useState("");
+  const [whatsAppResult, setWhatsAppResult] = useState<WhatsAppBookingResult | null>(null);
   const [agendaDate, setAgendaDate] = useState(todayInputValue);
   const isSecretary = profileRole === "secretary";
   const isAdministrator = profileRole === "administrator";
@@ -480,6 +497,12 @@ export default function DashboardClient({
     setModal("appointment");
   }
 
+  function openWhatsAppAppointment() {
+    setWhatsAppError("");
+    setWhatsAppResult(null);
+    setModal("whatsapp");
+  }
+
   async function savePatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPatientFormError("");
@@ -585,11 +608,7 @@ export default function DashboardClient({
     }
 
     const { data: possibleOverlaps, error: overlapError } = await overlapQuery;
-    const hasOverlap = (possibleOverlaps || []).some((appointment) => {
-      const existingStart = new Date(appointment.starts_at).getTime();
-      const existingEnd = existingStart + appointment.duration_minutes * 60_000;
-      return existingEnd > startsAt.getTime();
-    });
+    const hasOverlap = hasAppointmentOverlap(startsAt, durationMinutes, possibleOverlaps || []);
 
     if (overlapError) {
       setAppointmentFormError("No pudimos verificar la disponibilidad del horario. Intentá nuevamente.");
@@ -649,6 +668,195 @@ export default function DashboardClient({
     setModal(null);
     setSection("agenda");
     if (date !== agendaDate) setAgendaDate(date);
+  }
+
+  async function saveWhatsAppAppointment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setWhatsAppError("");
+
+    const form = new FormData(event.currentTarget);
+    const selectedPatientId = String(form.get("patientId") || "");
+    const existingPatient = patients.find((patient) => patient.id === selectedPatientId) || null;
+    const date = String(form.get("date") || "");
+    const time = String(form.get("time") || "");
+    const consultationType = String(form.get("consultationType") || "Control ginecológico");
+    const startsAt = new Date(`${date}T${time}:00`);
+
+    if (!date || !time || Number.isNaN(startsAt.getTime())) {
+      setWhatsAppError("Elegí una fecha y un horario válidos.");
+      return;
+    }
+    if (startsAt.getTime() < Date.now() - 60_000) {
+      setWhatsAppError("El turno no puede quedar agendado en un horario pasado.");
+      return;
+    }
+    if (startsAt.getMinutes() % 15 !== 0) {
+      setWhatsAppError("Elegí un horario en intervalos de 15 minutos.");
+      return;
+    }
+
+    let patientValues: ReturnType<typeof validatePatientDraft> | null = null;
+    let phone = existingPatient
+      ? String(form.get("existingPhone") || (existingPatient.phone === "Sin registrar" ? "" : existingPatient.phone)).trim()
+      : String(form.get("newPhone") || "").trim();
+
+    if (!existingPatient) {
+      patientValues = validatePatientDraft({
+        firstName: String(form.get("newFirstName") || ""),
+        lastName: String(form.get("newLastName") || ""),
+        dni: String(form.get("newDni") || ""),
+        birthDate: String(form.get("newBirthDate") || ""),
+        phone,
+      });
+
+      if (!patientValues.ok) {
+        setWhatsAppError(patientValues.message);
+        return;
+      }
+      if (hasDuplicateDni(patients, patientValues.values.dni)) {
+        setWhatsAppError("Ya existe una paciente con ese DNI. Buscala antes de continuar.");
+        return;
+      }
+      phone = patientValues.values.phone || "";
+    }
+
+    if (!normalizeWhatsAppPhone(phone)) {
+      setWhatsAppError("Ingresá un celular válido con código de área, por ejemplo 11 5555-5555.");
+      return;
+    }
+
+    setWhatsAppSaving(true);
+    const supabase = createClient();
+    let createdPatient: Patient | null = null;
+
+    try {
+      const durationMinutes = 15;
+      const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
+      const { data: possibleOverlaps, error: overlapError } = await supabase
+        .from("appointments")
+        .select("id, starts_at, duration_minutes")
+        .not("status", "in", "(cancelled,absent)")
+        .gt("starts_at", new Date(startsAt.getTime() - 240 * 60_000).toISOString())
+        .lt("starts_at", endsAt.toISOString());
+
+      if (overlapError) {
+        setWhatsAppError("No pudimos comprobar si el horario está disponible. Intentá nuevamente.");
+        return;
+      }
+
+      const hasOverlap = hasAppointmentOverlap(startsAt, durationMinutes, possibleOverlaps || []);
+
+      if (hasOverlap) {
+        setWhatsAppError("Ese horario ya está ocupado. Elegí otro intervalo de 15 minutos.");
+        return;
+      }
+
+      const { data: claimsData } = await supabase.auth.getClaims();
+      const currentUserId = claimsData?.claims?.sub;
+
+      if (!currentUserId) {
+        setWhatsAppError("La sesión venció. Volvé a ingresar antes de guardar el turno.");
+        return;
+      }
+
+      let appointmentPatient = existingPatient;
+
+      if (!appointmentPatient && patientValues?.ok) {
+        const { data: savedPatient, error: patientError } = await supabase
+          .from("patients")
+          .insert(patientValues.values)
+          .select("id, first_name, last_name, dni, birth_date, phone")
+          .single();
+
+        if (patientError || !savedPatient) {
+          setWhatsAppError(patientSaveErrorMessage(patientError));
+          return;
+        }
+
+        createdPatient = mapPatient(savedPatient as PatientRow);
+        appointmentPatient = createdPatient;
+        setPatients((current) => [createdPatient as Patient, ...current]);
+      } else if (appointmentPatient && phone !== (appointmentPatient.phone === "Sin registrar" ? "" : appointmentPatient.phone)) {
+        const { data: updatedPatient, error: phoneError } = await supabase
+          .from("patients")
+          .update({ phone })
+          .eq("id", appointmentPatient.id)
+          .select("id, first_name, last_name, dni, birth_date, phone")
+          .single();
+
+        if (phoneError || !updatedPatient) {
+          setWhatsAppError(patientSaveErrorMessage(phoneError));
+          return;
+        }
+
+        appointmentPatient = mapPatient(updatedPatient as PatientRow);
+        setPatients((current) => current.map((patient) =>
+          patient.id === appointmentPatient?.id ? appointmentPatient : patient,
+        ));
+      }
+
+      if (!appointmentPatient) {
+        setWhatsAppError("Seleccioná una paciente o completá sus datos.");
+        return;
+      }
+
+      const { data: savedAppointment, error: appointmentError } = await supabase
+        .from("appointments")
+        .insert({
+          patient_id: appointmentPatient.id,
+          professional_id: profileRole === "professional" ? currentUserId : null,
+          starts_at: startsAt.toISOString(),
+          duration_minutes: durationMinutes,
+          consultation_type: consultationType,
+          administrative_notes: "Agendado por WhatsApp",
+          is_walk_in: false,
+          status: "confirmed",
+        })
+        .select("id, patient_id, professional_id, starts_at, duration_minutes, consultation_type, administrative_notes, is_walk_in, status")
+        .single();
+
+      if (appointmentError || !savedAppointment) {
+        setWhatsAppError(
+          appointmentError?.code === "23505" || appointmentError?.code === "23P01"
+            ? "El horario acaba de ocuparse. Elegí otro para completar el turno."
+            : createdPatient
+              ? "La paciente quedó registrada, pero no pudimos crear el turno. Volvé a intentarlo seleccionándola en la búsqueda."
+              : "No pudimos guardar el turno. Revisá los datos e intentá nuevamente.",
+        );
+        return;
+      }
+
+      const mappedAppointment = mapAppointment({
+        ...(savedAppointment as Omit<AppointmentRow, "patients">),
+        patients: {
+          first_name: appointmentPatient.firstName,
+          last_name: appointmentPatient.lastName,
+        },
+      });
+
+      if (date === agendaDate) {
+        setAppointments((current) => [...current, mappedAppointment]
+          .sort((first, second) => first.startsAt.localeCompare(second.startsAt)));
+      }
+
+      const confirmation = {
+        patientName: appointmentPatient.name,
+        date,
+        time,
+      };
+      setWhatsAppResult({
+        ...confirmation,
+        phone,
+        confirmationUrl: buildWhatsAppConfirmationUrl(phone, confirmation),
+      });
+    } catch (error) {
+      console.error("whatsapp_appointment_save_failed", {
+        reason: error instanceof Error ? error.name : "request_exception",
+      });
+      setWhatsAppError("No pudimos conectarnos con el sistema. Verificá Internet y volvé a intentar.");
+    } finally {
+      setWhatsAppSaving(false);
+    }
   }
 
   async function deleteAppointment() {
@@ -764,8 +972,8 @@ export default function DashboardClient({
         </header>
 
         <div className="content">
-          {section === "inicio" && <Dashboard profileName={profileName} isSecretary={isSecretary} patientCount={patients.length} patientsLoading={patientsLoading} patients={patients} appointments={appointments} appointmentsLoading={appointmentsLoading} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onNewPatient={openNewPatient} onNewAppointment={openNewAppointment} onWalkIn={openWalkInAppointment} onAgenda={() => navigateTo("agenda")} onPatients={() => navigateTo("pacientes")} />}
-          {section === "agenda" && <Agenda selectedDate={agendaDate} onDateChange={setAgendaDate} appointments={appointments} loading={appointmentsLoading} loadError={appointmentsError} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onEditAppointment={openEditAppointment} onNewAppointment={openNewAppointment} onWalkIn={openWalkInAppointment} canMarkAttended={!isSecretary} />}
+          {section === "inicio" && <Dashboard profileName={profileName} isSecretary={isSecretary} patientCount={patients.length} patientsLoading={patientsLoading} patients={patients} appointments={appointments} appointmentsLoading={appointmentsLoading} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onNewPatient={openNewPatient} onNewAppointment={openNewAppointment} onWhatsApp={openWhatsAppAppointment} onWalkIn={openWalkInAppointment} onAgenda={() => navigateTo("agenda")} onPatients={() => navigateTo("pacientes")} />}
+          {section === "agenda" && <Agenda selectedDate={agendaDate} onDateChange={setAgendaDate} appointments={appointments} loading={appointmentsLoading} loadError={appointmentsError} updatingAppointmentId={appointmentStatusUpdating} onStatusChange={changeAppointmentStatus} onEditAppointment={openEditAppointment} onNewAppointment={openNewAppointment} onWhatsApp={openWhatsAppAppointment} onWalkIn={openWalkInAppointment} canMarkAttended={!isSecretary} />}
           {section === "pacientes" && <Patients patients={filteredPatients} loading={patientsLoading} loadError={patientsError} search={search} setSearch={setSearch} onNewPatient={openNewPatient} onSelect={setSelectedPatient} />}
           {section === "historia" && <ClinicalHistory patients={patients} onSelect={setSelectedPatient} />}
           {section === "usuarios" && isAdministrator && <UserAdministration />}
@@ -780,12 +988,13 @@ export default function DashboardClient({
 
       {modal === "patient" && <PatientModal patient={editingPatient} contactOnly={isSecretary && Boolean(editingPatient)} saving={patientSaving} error={patientFormError} onClose={() => { if (!patientSaving) { setEditingPatient(null); setModal(null); } }} onSubmit={savePatient} />}
       {modal === "appointment" && <AppointmentModal patients={patients} appointment={editingAppointment} isWalkIn={appointmentWalkIn} defaultDate={agendaDate} saving={appointmentSaving || appointmentDeleting} deleting={appointmentDeleting} canDelete={!isSecretary} error={appointmentFormError} onClose={() => { if (!appointmentSaving && !appointmentDeleting) { setEditingAppointment(null); setAppointmentWalkIn(false); setModal(null); } }} onSubmit={saveAppointment} onDelete={deleteAppointment} />}
+      {modal === "whatsapp" && <WhatsAppAppointmentModal patients={patients} defaultDate={agendaDate} saving={whatsAppSaving} error={whatsAppError} result={whatsAppResult} onClose={() => { if (!whatsAppSaving) { setWhatsAppError(""); setWhatsAppResult(null); setModal(null); } }} onSubmit={saveWhatsAppAppointment} onViewAgenda={() => { const resultDate = whatsAppResult?.date; setWhatsAppResult(null); setModal(null); setSection("agenda"); if (resultDate) setAgendaDate(resultDate); }} />}
       {selectedPatient && <PatientDrawer patient={selectedPatient} profileName={profileName} profileRole={profileRole} deleting={patientDeleting} deleteError={patientDeleteError} onDelete={deletePatient} onEdit={() => openEditPatient(selectedPatient)} onClose={() => { if (!patientDeleting) { setPatientDeleteError(""); setSelectedPatient(null); } }} />}
     </main>
   );
 }
 
-function Dashboard({ profileName, isSecretary, patientCount, patientsLoading, patients, appointments, appointmentsLoading, updatingAppointmentId, onStatusChange, onNewPatient, onNewAppointment, onWalkIn, onAgenda, onPatients }: { profileName: string; isSecretary: boolean; patientCount: number; patientsLoading: boolean; patients: Patient[]; appointments: Appointment[]; appointmentsLoading: boolean; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onNewPatient: () => void; onNewAppointment: () => void; onWalkIn: () => void; onAgenda: () => void; onPatients: () => void }) {
+function Dashboard({ profileName, isSecretary, patientCount, patientsLoading, patients, appointments, appointmentsLoading, updatingAppointmentId, onStatusChange, onNewPatient, onNewAppointment, onWhatsApp, onWalkIn, onAgenda, onPatients }: { profileName: string; isSecretary: boolean; patientCount: number; patientsLoading: boolean; patients: Patient[]; appointments: Appointment[]; appointmentsLoading: boolean; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onNewPatient: () => void; onNewAppointment: () => void; onWhatsApp: () => void; onWalkIn: () => void; onAgenda: () => void; onPatients: () => void }) {
   const [renderedAt] = useState(() => Date.now());
   const confirmedCount = appointments.filter((appointment) => appointment.status === "Confirmado").length;
   const attendedCount = appointments.filter((appointment) => appointment.status === "Atendido").length;
@@ -815,6 +1024,7 @@ function Dashboard({ profileName, isSecretary, patientCount, patientsLoading, pa
       </section>
       <aside className="right-column">
         <section className="card quick-actions"><div className="card-header"><div><h2>Acciones rápidas</h2><p>Atajos frecuentes</p></div></div>
+          <button onClick={onWhatsApp}><span className="quick-icon whatsapp">◉</span><span><strong>Agendar desde WhatsApp</strong><small>Paciente y turno en un solo paso</small></span><b>›</b></button>
           <button onClick={onNewAppointment}><span className="quick-icon">＋</span><span><strong>Nuevo turno</strong><small>Agendar una consulta</small></span><b>›</b></button>
           <button onClick={onWalkIn}><span className="quick-icon green">●</span><span><strong>Paciente sin turno</strong><small>Registrar llegada espontánea</small></span><b>›</b></button>
           <button onClick={onNewPatient}><span className="quick-icon rose">◎</span><span><strong>Nueva paciente</strong><small>Registrar ficha personal</small></span><b>›</b></button>
@@ -840,7 +1050,7 @@ function AppointmentRow({ id, time, patient, type, status, updating, canMarkAtte
   return <div className="appointment-row"><strong className="appointment-time">{time}</strong><span className="avatar">{patient.split(" ").map((p) => p[0]).join("").slice(0, 2)}</span><div className="appointment-person"><strong>{patient}</strong><small>{type}</small></div><AppointmentStatusSelect appointmentId={id} patient={patient} status={status} updating={updating} canMarkAttended={canMarkAttended} onStatusChange={onStatusChange} /></div>;
 }
 
-function Agenda({ selectedDate, onDateChange, appointments, loading, loadError, updatingAppointmentId, onStatusChange, onEditAppointment, onNewAppointment, onWalkIn, canMarkAttended }: { selectedDate: string; onDateChange: (date: string) => void; appointments: Appointment[]; loading: boolean; loadError: string; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onEditAppointment: (appointment: Appointment) => void; onNewAppointment: () => void; onWalkIn: () => void; canMarkAttended: boolean }) {
+function Agenda({ selectedDate, onDateChange, appointments, loading, loadError, updatingAppointmentId, onStatusChange, onEditAppointment, onNewAppointment, onWhatsApp, onWalkIn, canMarkAttended }: { selectedDate: string; onDateChange: (date: string) => void; appointments: Appointment[]; loading: boolean; loadError: string; updatingAppointmentId: string | null; onStatusChange: (appointmentId: string, status: AppointmentStatus) => void; onEditAppointment: (appointment: Appointment) => void; onNewAppointment: () => void; onWhatsApp: () => void; onWalkIn: () => void; canMarkAttended: boolean }) {
   const selectedDateValue = new Date(`${selectedDate}T12:00:00`);
   const dateLabel = new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(selectedDateValue);
   const isToday = selectedDate === todayInputValue();
@@ -850,7 +1060,7 @@ function Agenda({ selectedDate, onDateChange, appointments, loading, loadError, 
     onDateChange(dateInputValue(nextDate));
   };
 
-  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">ORGANIZACIÓN</p><h1>Agenda</h1><p>Gestioná las consultas y horarios del consultorio.</p></div><div className="page-heading-actions"><button className="secondary-button" onClick={onWalkIn}>● Paciente sin turno</button><button className="primary-button" onClick={onNewAppointment}>＋ Nuevo turno</button></div></div>{loadError && <div className="data-error" role="alert">{loadError}</div>}<section className="card calendar-card"><div className="calendar-toolbar"><button onClick={() => moveDate(-1)} aria-label="Ver día anterior">‹</button><div className="calendar-date-title"><h2>{dateLabel}</h2>{isToday && <span>Hoy</span>}</div><button onClick={() => moveDate(1)} aria-label="Ver día siguiente">›</button><label className="calendar-date-picker"><span>Elegir fecha</span><input type="date" value={selectedDate} onChange={(event) => onDateChange(event.target.value)} aria-label="Elegir fecha de la agenda" /></label><div className="view-switch"><button className={isToday ? "active" : ""} onClick={() => onDateChange(todayInputValue())} disabled={isToday}>Hoy</button><button className="active">Día</button><button disabled>Semana</button></div></div><div className="day-schedule">{appointments.map((a) => <div className="schedule-slot" key={a.id}><time>{a.time}</time><div className={`schedule-event event-${appointmentStatusValues[a.status]}`}><span className="event-accent" aria-hidden="true" /><strong>{a.patient}{a.isWalkIn ? " · Sin turno" : ""}</strong><span>{a.type}</span><div className="schedule-event-actions"><button type="button" onClick={() => onEditAppointment(a)} aria-label={`Editar turno de ${a.patient}`}>Editar</button><AppointmentStatusSelect appointmentId={a.id} patient={a.patient} status={a.status} updating={updatingAppointmentId === a.id} canMarkAttended={canMarkAttended} onStatusChange={onStatusChange} /></div></div></div>)}{!loading && appointments.length === 0 && <div className="agenda-empty"><span>◷</span><h3>Agenda libre</h3><p>No hay turnos registrados para esta fecha.</p><button className="secondary-button" onClick={onNewAppointment}>Crear un turno para este día</button></div>}{loading && <div className="agenda-empty"><p>Cargando agenda...</p></div>}</div></section></div>;
+  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">ORGANIZACIÓN</p><h1>Agenda</h1><p>Gestioná las consultas y horarios del consultorio.</p></div><div className="page-heading-actions"><button className="whatsapp-button" onClick={onWhatsApp}>◉ WhatsApp</button><button className="secondary-button" onClick={onWalkIn}>● Paciente sin turno</button><button className="primary-button" onClick={onNewAppointment}>＋ Nuevo turno</button></div></div>{loadError && <div className="data-error" role="alert">{loadError}</div>}<section className="card calendar-card"><div className="calendar-toolbar"><button onClick={() => moveDate(-1)} aria-label="Ver día anterior">‹</button><div className="calendar-date-title"><h2>{dateLabel}</h2>{isToday && <span>Hoy</span>}</div><button onClick={() => moveDate(1)} aria-label="Ver día siguiente">›</button><label className="calendar-date-picker"><span>Elegir fecha</span><input type="date" value={selectedDate} onChange={(event) => onDateChange(event.target.value)} aria-label="Elegir fecha de la agenda" /></label><div className="view-switch"><button className={isToday ? "active" : ""} onClick={() => onDateChange(todayInputValue())} disabled={isToday}>Hoy</button><button className="active">Día</button><button disabled>Semana</button></div></div><div className="day-schedule">{appointments.map((a) => <div className="schedule-slot" key={a.id}><time>{a.time}</time><div className={`schedule-event event-${appointmentStatusValues[a.status]}`}><span className="event-accent" aria-hidden="true" /><strong>{a.patient}{a.isWalkIn ? " · Sin turno" : ""}</strong><span>{a.type}</span><div className="schedule-event-actions"><button type="button" onClick={() => onEditAppointment(a)} aria-label={`Editar turno de ${a.patient}`}>Editar</button><AppointmentStatusSelect appointmentId={a.id} patient={a.patient} status={a.status} updating={updatingAppointmentId === a.id} canMarkAttended={canMarkAttended} onStatusChange={onStatusChange} /></div></div></div>)}{!loading && appointments.length === 0 && <div className="agenda-empty"><span>◷</span><h3>Agenda libre</h3><p>No hay turnos registrados para esta fecha.</p><button className="secondary-button" onClick={onNewAppointment}>Crear un turno para este día</button></div>}{loading && <div className="agenda-empty"><p>Cargando agenda...</p></div>}</div></section></div>;
 }
 
 function Patients({ patients, loading, loadError, search, setSearch, onNewPatient, onSelect }: { patients: Patient[]; loading: boolean; loadError: string; search: string; setSearch: (value: string) => void; onNewPatient: () => void; onSelect: (patient: Patient) => void }) {
@@ -1097,6 +1307,26 @@ function UserAdministration() {
       )}
     </div>
   );
+}
+
+function WhatsAppAppointmentModal({ patients, defaultDate, saving, error, result, onClose, onSubmit, onViewAgenda }: { patients: Patient[]; defaultDate: string; saving: boolean; error: string; result: WhatsAppBookingResult | null; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onViewAgenda: () => void }) {
+  const [mode, setMode] = useState<"search" | "new">("search");
+  const [patientSearch, setPatientSearch] = useState("");
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) || null;
+  const matchingPatients = useMemo(() => {
+    const term = patientSearch.trim().toLowerCase();
+    if (term.length < 2) return [];
+    return patients.filter((patient) =>
+      `${patient.name} ${patient.dni} ${patient.phone}`.toLowerCase().includes(term),
+    ).slice(0, 6);
+  }, [patientSearch, patients]);
+
+  if (result) {
+    return <div className="modal-backdrop" role="presentation"><section className="modal whatsapp-modal" role="dialog" aria-modal="true" aria-labelledby="whatsapp-success-title"><div className="modal-header"><div><p className="eyebrow">TURNO CONFIRMADO</p><h2 id="whatsapp-success-title">Listo para enviar por WhatsApp</h2></div><button onClick={onClose} aria-label="Cerrar">×</button></div><div className="whatsapp-success"><span className="whatsapp-success-icon" aria-hidden="true">✓</span><h3>{result.patientName}</h3><p>El turno ya aparece como confirmado en la agenda.</p><div className="whatsapp-confirmation-card"><span><small>Fecha</small><strong>{formatWhatsAppAppointmentDate(result.date)}</strong></span><span><small>Horario</small><strong>{result.time} h</strong></span><span><small>WhatsApp</small><strong>{result.phone}</strong></span></div><a className="whatsapp-button whatsapp-send" href={result.confirmationUrl} target="_blank" rel="noreferrer">Abrir WhatsApp con el mensaje</a><button type="button" className="secondary-button full" onClick={onViewAgenda}>Ver turno en la agenda</button></div></section></div>;
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal whatsapp-modal" role="dialog" aria-modal="true" aria-labelledby="whatsapp-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">AGENDA RÁPIDA</p><h2 id="whatsapp-modal-title">Agendar desde WhatsApp</h2><small className="modal-subtitle">Paciente y turno en una sola pantalla.</small></div><button onClick={onClose} aria-label="Cerrar" disabled={saving}>×</button></div><form onSubmit={onSubmit}><section className="whatsapp-step"><div className="whatsapp-step-title"><span>1</span><div><strong>Seleccionar paciente</strong><small>Buscá por nombre, DNI o teléfono.</small></div></div>{mode === "search" ? <>{selectedPatient ? <div className="whatsapp-selected-patient"><span className="avatar">{selectedPatient.initials}</span><span><strong>{selectedPatient.name}</strong><small>DNI {selectedPatient.dni}</small></span><button type="button" onClick={() => { setSelectedPatientId(""); setPatientSearch(""); }}>Cambiar</button><input type="hidden" name="patientId" value={selectedPatient.id} /></div> : <><label className="whatsapp-search"><span aria-hidden="true">⌕</span><input value={patientSearch} onChange={(event) => setPatientSearch(event.target.value)} placeholder="Ej. Ana, 12345678 o 11 5555..." autoFocus /></label>{patientSearch.trim().length >= 2 && <div className="whatsapp-results">{matchingPatients.map((patient) => <button type="button" key={patient.id} onClick={() => setSelectedPatientId(patient.id)}><span className="avatar">{patient.initials}</span><span><strong>{patient.name}</strong><small>DNI {patient.dni} · {patient.phone}</small></span><b>Elegir</b></button>)}{matchingPatients.length === 0 && <p>No encontramos coincidencias.</p>}</div>}<button type="button" className="whatsapp-new-patient" onClick={() => setMode("new")}>＋ Registrar paciente nueva</button></>}</> : <div className="whatsapp-new-fields"><button type="button" className="text-button" onClick={() => setMode("search")}>← Buscar una paciente existente</button><div className="form-grid"><label>Nombre<input name="newFirstName" required maxLength={100} autoCapitalize="words" placeholder="Ej. Ana" /></label><label>Apellido<input name="newLastName" required maxLength={100} autoCapitalize="words" placeholder="Ej. Martínez" /></label><label>DNI<input name="newDni" required minLength={6} maxLength={20} inputMode="numeric" placeholder="00.000.000" /></label><label>Nacimiento<input name="newBirthDate" type="date" required max={localDateInputValue()} /></label><label className="wide">Celular con código de área<input name="newPhone" required maxLength={50} inputMode="tel" placeholder="11 5555-5555" /></label></div></div>}{selectedPatient && <div className="form-grid whatsapp-existing-contact"><label className="wide">Celular para enviar la confirmación<input name="existingPhone" required maxLength={50} inputMode="tel" defaultValue={selectedPatient.phone === "Sin registrar" ? "" : selectedPatient.phone} placeholder="11 5555-5555" /></label></div>}</section><section className="whatsapp-step"><div className="whatsapp-step-title"><span>2</span><div><strong>Elegir turno</strong><small>Los turnos duran 15 minutos.</small></div></div><div className="form-grid"><label>Fecha<input name="date" type="date" required min={localDateInputValue()} defaultValue={defaultDate < localDateInputValue() ? localDateInputValue() : defaultDate} /></label><label>Horario<input name="time" type="time" required step={900} defaultValue="09:00" /></label><label className="wide">Tipo de consulta<select name="consultationType" defaultValue="Control ginecológico"><option>Control ginecológico</option><option>Primera consulta</option><option>PAP y control</option><option>Colposcopía</option><option>Control de embarazo</option><option>Procedimiento</option></select></label></div></section><p className="form-hint">El turno se guardará como confirmado y quedará identificado como agendado por WhatsApp. El mensaje no incluirá información clínica.</p>{error && <div className="data-error modal-error" role="alert">{error}</div>}<div className="form-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="whatsapp-button" disabled={saving}>{saving ? "Guardando..." : "Guardar turno"}</button></div></form></section></div>;
 }
 
 function PatientModal({ patient, contactOnly, saving, error, onClose, onSubmit }: { patient: Patient | null; contactOnly: boolean; saving: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {

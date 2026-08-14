@@ -879,3 +879,204 @@ html, body {
   .theme-menu { right:-47px; }
   :root[data-theme="dark"] .topbar { background:#181317f2; }
 }
+
+/* Agenda rápida desde WhatsApp */
+.whatsapp-button {
+  min-height:42px;
+  padding:0 16px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  color:#fff;
+  border:1px solid #18794e;
+  border-radius:11px;
+  background:linear-gradient(135deg,#219b63,#167447);
+  box-shadow:0 9px 22px #16744725;
+  font-size:12px;
+  font-weight:800;
+  text-decoration:none;
+}
+.whatsapp-button:hover { background:linear-gradient(135deg,#178b56,#105f3a); }
+.whatsapp-button:disabled { opacity:.65; cursor:wait; }
+.quick-icon.whatsapp { color:#18794e; background:#e4f5eb; }
+.whatsapp-modal { width:min(720px,100%); }
+.whatsapp-step {
+  margin-top:14px;
+  padding:17px;
+  border:1px solid #e3d8cb;
+  border-radius:15px;
+  background:#fbf8f3;
+}
+.whatsapp-step + .whatsapp-step { margin-top:12px; }
+.whatsapp-step-title {
+  margin-bottom:15px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.whatsapp-step-title > span {
+  width:28px;
+  height:28px;
+  flex:0 0 28px;
+  display:grid;
+  place-items:center;
+  color:#fff;
+  border-radius:50%;
+  background:#18794e;
+  font-size:11px;
+  font-weight:850;
+}
+.whatsapp-step-title > div { display:flex; flex-direction:column; }
+.whatsapp-step-title strong { font-size:12px; }
+.whatsapp-step-title small { margin-top:2px; color:var(--muted); font-size:9px; }
+.whatsapp-search {
+  height:44px;
+  padding:0 12px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid #d9cec2;
+  border-radius:11px;
+  background:#fffdf9;
+}
+.whatsapp-search > span { color:var(--muted); font-size:17px; }
+.whatsapp-search input {
+  width:100%;
+  border:0;
+  outline:0;
+  color:var(--ink);
+  background:transparent;
+  font-size:11px;
+}
+.whatsapp-results {
+  margin-top:8px;
+  overflow:hidden;
+  border:1px solid #e2d8cc;
+  border-radius:11px;
+  background:#fffdf9;
+}
+.whatsapp-results > button {
+  width:100%;
+  min-height:55px;
+  padding:8px 11px;
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  align-items:center;
+  gap:10px;
+  color:var(--ink);
+  border:0;
+  border-bottom:1px solid #eee5da;
+  background:transparent;
+  text-align:left;
+}
+.whatsapp-results > button:last-of-type { border-bottom:0; }
+.whatsapp-results > button:hover { background:#f7f1e9; }
+.whatsapp-results > button > span:nth-child(2) { min-width:0; display:flex; flex-direction:column; }
+.whatsapp-results strong { font-size:11px; }
+.whatsapp-results small {
+  margin-top:3px;
+  overflow:hidden;
+  color:var(--muted);
+  font-size:9px;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.whatsapp-results b { color:#18794e; font-size:9px; }
+.whatsapp-results > p { margin:0; padding:16px; color:var(--muted); text-align:center; font-size:10px; }
+.whatsapp-new-patient {
+  width:100%;
+  min-height:40px;
+  margin-top:9px;
+  color:#18794e;
+  border:1px dashed #9dc9b1;
+  border-radius:10px;
+  background:#edf7f1;
+  font-size:10px;
+  font-weight:800;
+}
+.whatsapp-new-patient:hover { background:#e3f2e9; }
+.whatsapp-new-fields > .text-button { margin:0 0 14px; padding:0; }
+.whatsapp-selected-patient {
+  padding:11px 12px;
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  align-items:center;
+  gap:11px;
+  border:1px solid #b9d8c5;
+  border-radius:12px;
+  background:#edf7f1;
+}
+.whatsapp-selected-patient > span:nth-child(2) { display:flex; flex-direction:column; }
+.whatsapp-selected-patient strong { font-size:11px; }
+.whatsapp-selected-patient small { margin-top:3px; color:var(--muted); font-size:9px; }
+.whatsapp-selected-patient button {
+  padding:6px 8px;
+  color:#18794e;
+  border:0;
+  border-radius:7px;
+  background:#fff;
+  font-size:9px;
+  font-weight:800;
+}
+.whatsapp-existing-contact { margin-top:13px; }
+.whatsapp-success { padding:8px 0 3px; text-align:center; }
+.whatsapp-success-icon {
+  width:55px;
+  height:55px;
+  margin:0 auto;
+  display:grid;
+  place-items:center;
+  color:#fff;
+  border-radius:50%;
+  background:#18794e;
+  box-shadow:0 8px 22px #18794e30;
+  font-size:24px;
+}
+.whatsapp-success h3 { margin:14px 0 5px; font-size:19px; }
+.whatsapp-success > p { margin:0; color:var(--muted); font-size:11px; }
+.whatsapp-confirmation-card {
+  margin:20px 0 14px;
+  padding:14px;
+  display:grid;
+  grid-template-columns:1.4fr .7fr 1fr;
+  gap:10px;
+  border:1px solid #d9cec2;
+  border-radius:13px;
+  background:#fbf8f3;
+  text-align:left;
+}
+.whatsapp-confirmation-card span { min-width:0; display:flex; flex-direction:column; }
+.whatsapp-confirmation-card small { color:var(--muted); font-size:8px; text-transform:uppercase; letter-spacing:.08em; }
+.whatsapp-confirmation-card strong { margin-top:4px; overflow:hidden; font-size:10px; text-overflow:ellipsis; text-transform:capitalize; white-space:nowrap; }
+.whatsapp-send { width:100%; margin-bottom:9px; }
+
+:root[data-theme="dark"] .quick-icon.whatsapp { color:#82c6a1; background:#20372c; }
+:root[data-theme="dark"] .whatsapp-step,
+:root[data-theme="dark"] .whatsapp-confirmation-card {
+  border-color:#47373e;
+  background:#191418;
+}
+:root[data-theme="dark"] .whatsapp-search,
+:root[data-theme="dark"] .whatsapp-results {
+  border-color:#493941;
+  background:#21191e;
+}
+:root[data-theme="dark"] .whatsapp-results > button { color:var(--ink); border-bottom-color:#3d2f35; }
+:root[data-theme="dark"] .whatsapp-results > button:hover { background:#2d2126; }
+:root[data-theme="dark"] .whatsapp-new-patient,
+:root[data-theme="dark"] .whatsapp-selected-patient {
+  color:#9fd5b4;
+  border-color:#365b45;
+  background:#20342a;
+}
+:root[data-theme="dark"] .whatsapp-selected-patient button { color:#9fd5b4; background:#17251d; }
+
+@media (max-width:760px) {
+  .page-heading-actions { flex-wrap:wrap; }
+  .page-heading-actions > .whatsapp-button { flex-basis:100%; }
+  .whatsapp-modal { max-height:calc(100vh - 20px); padding:18px 15px; }
+  .whatsapp-step { padding:13px; }
+  .whatsapp-confirmation-card { grid-template-columns:1fr 1fr; }
+  .whatsapp-confirmation-card span:last-child { grid-column:1 / -1; }
+}
